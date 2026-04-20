@@ -1,0 +1,40 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
+	"vcs": {
+		"clientKind": "git",
+		"enabled": true,
+		"useIgnoreFile": true
+	},
+	"assist": {
+		"actions": {
+			"recommended": true,
+			"source": {
+				"noDuplicateClasses": "on",
+				"organizeImports": "on"
+			}
+		},
+		"enabled": true
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
+	"files": {
+		"ignoreUnknown": true,
+		"includes": ["**"]
+	},
+	"formatter": {
+		"enabled": true
+	},
+	"linter": {
+		"domains": {
+			"test": "all",
+			"types": "all"
+		},
+		"enabled": true,
+		"rules": {
+			"recommended": true
+		}
+	}
+}

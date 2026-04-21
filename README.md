@@ -5,10 +5,11 @@ Minimal Pi package that adds an opencode-lite `ask_questions` tool.
 ## What it does
 
 - asks one or more structured questions in Pi's interactive TUI
-- keeps the flow small and fast: arrows or `hjkl`, enter, escape, numeric shortcuts
+- keeps the flow small and fast: arrows or vim-style `h/j/k`, enter, escape, numeric shortcuts
 - supports single-choice options plus an optional custom answer
 - uses a final review step for multi-question runs
 - returns graceful non-error results for cancel and non-interactive sessions
+- documents the extension code with TSDoc comments for quick maintenance
 
 ## Local development
 

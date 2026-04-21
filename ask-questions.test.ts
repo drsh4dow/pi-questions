@@ -24,6 +24,17 @@ function getTool(): AskQuestionsTool {
 	return tool as AskQuestionsTool;
 }
 
+function createTheme() {
+	return {
+		bold(text: string) {
+			return text;
+		},
+		fg(_color: string, text: string) {
+			return text;
+		},
+	};
+}
+
 test("registers the ask_questions tool with tight schema limits", () => {
 	const tool = getTool();
 	const questions = (
@@ -72,5 +83,76 @@ test("returns a graceful unavailable result when interactive UI is missing", asy
 			},
 		],
 		answers: [],
+	});
+});
+
+test("uses j to move while l does not submit", async () => {
+	const tool = getTool();
+	const result = await tool.execute(
+		"call-2",
+		{
+			questions: [
+				{
+					question: "Pick one",
+					options: [
+						{ label: "First", description: "First option" },
+						{ label: "Second", description: "Second option" },
+					],
+					allowCustom: false,
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{
+			hasUI: true,
+			ui: {
+				async custom(factory: unknown) {
+					let submitted: unknown;
+					const component = (
+						factory as (
+							tui: { requestRender: () => void },
+							theme: ReturnType<typeof createTheme>,
+							keybindings: unknown,
+							done: (value: unknown) => void,
+						) => { handleInput: (data: string) => void }
+					)({ requestRender() {} }, createTheme(), {}, (value) => {
+						submitted = value;
+					});
+
+					component.handleInput("j");
+					component.handleInput("l");
+					expect(submitted).toBeUndefined();
+					component.handleInput("\r");
+					return submitted;
+				},
+			},
+		} as ExtensionContext,
+	);
+
+	expect(result.content[0]).toEqual({
+		type: "text",
+		text: 'User answers: "Pick one"="Second".',
+	});
+	expect(result.details).toEqual({
+		status: "answered",
+		questions: [
+			{
+				header: "Q1",
+				question: "Pick one",
+				options: ["First", "Second"],
+				allowCustom: false,
+			},
+		],
+		answers: [
+			{
+				questionIndex: 0,
+				header: "Q1",
+				question: "Pick one",
+				answer: "Second",
+				wasCustom: false,
+				optionIndex: 2,
+			},
+		],
 	});
 });

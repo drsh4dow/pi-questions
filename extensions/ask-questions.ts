@@ -1,4 +1,8 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type {
+	AgentToolResult,
+	ExtensionAPI,
+	ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
 import {
 	Editor,
 	type EditorTheme,
@@ -8,6 +12,13 @@ import {
 	truncateToWidth,
 } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
+
+const CUSTOM_LABEL = "Type your own answer";
+const CUSTOM_DESCRIPTION = "Write a short custom answer.";
+const UNAVAILABLE_TEXT =
+	"ask_questions requires the interactive TUI. Ask the user in chat instead.";
+const CANCELLED_TEXT =
+	"The user dismissed the questions without submitting answers.";
 
 const OptionSchema = Type.Object({
 	label: Type.String({
@@ -63,6 +74,15 @@ type QuestionOption = Static<typeof OptionSchema>;
 type InputQuestion = Static<typeof QuestionSchema>;
 type DisplayOption = QuestionOption & { isCustom?: true };
 
+/** Normalized question shape used internally by the TUI flow. */
+interface NormalizedQuestion {
+	header: string;
+	question: string;
+	options: QuestionOption[];
+	allowCustom: boolean;
+}
+
+/** Serializable question metadata persisted in tool results. */
 interface QuestionDetails {
 	header: string;
 	question: string;
@@ -70,6 +90,7 @@ interface QuestionDetails {
 	allowCustom: boolean;
 }
 
+/** Serializable answer metadata persisted in tool results. */
 interface AnswerDetails {
 	questionIndex: number;
 	header: string;
@@ -79,12 +100,49 @@ interface AnswerDetails {
 	optionIndex?: number;
 }
 
+/** Full persisted result shape for the ask_questions tool. */
 interface ToolDetails {
 	status: "answered" | "cancelled" | "unavailable";
 	questions: QuestionDetails[];
 	answers: AnswerDetails[];
 }
 
+/**
+ * Normalizes tool arguments into the shape used by rendering and result storage.
+ */
+function normalizeQuestions(input: InputQuestion[]): NormalizedQuestion[] {
+	return input.map((question, index) => ({
+		header: question.header?.trim() || `Q${index + 1}`,
+		question: question.question,
+		options: question.options,
+		allowCustom: question.allowCustom !== false,
+	}));
+}
+
+/** Converts normalized questions into persisted tool metadata. */
+function toQuestionDetails(questions: NormalizedQuestion[]): QuestionDetails[] {
+	return questions.map((question) => ({
+		header: question.header,
+		question: question.question,
+		options: question.options.map((option) => option.label),
+		allowCustom: question.allowCustom,
+	}));
+}
+
+/**
+ * Builds the standard text content for a tool result.
+ */
+function textResult(
+	text: string,
+	details: ToolDetails,
+): AgentToolResult<ToolDetails> {
+	return {
+		content: [{ type: "text", text }],
+		details,
+	};
+}
+
+/** Summarizes submitted answers into a compact model-friendly sentence fragment. */
 function summarize(details: ToolDetails): string {
 	if (details.answers.length === 0) {
 		return "No answers were submitted.";
@@ -95,6 +153,339 @@ function summarize(details: ToolDetails): string {
 		.join(", ");
 }
 
+/**
+ * Runs the interactive ask_questions flow.
+ *
+ * Keymap:
+ * - `j` / `k` or arrow keys move through options
+ * - `h` or left arrow returns to the previous screen
+ * - `Enter` confirms the current option or submits the review screen
+ * - `Esc` cancels the flow
+ */
+async function askQuestionsInTui(
+	ctx: ExtensionContext,
+	questions: NormalizedQuestion[],
+	detailsQuestions: QuestionDetails[],
+): Promise<ToolDetails> {
+	return ctx.ui.custom<ToolDetails>((tui, theme, _kb, done) => {
+		const answers: Array<AnswerDetails | undefined> = new Array(
+			questions.length,
+		);
+		const drafts = new Array<string>(questions.length).fill("");
+		const selections = new Array<number>(questions.length).fill(0);
+		const single = questions.length === 1;
+		const editorTheme: EditorTheme = {
+			borderColor: (text) => theme.fg("accent", text),
+			selectList: {
+				selectedPrefix: (text) => theme.fg("accent", text),
+				selectedText: (text) => theme.fg("accent", text),
+				description: (text) => theme.fg("muted", text),
+				scrollInfo: (text) => theme.fg("dim", text),
+				noMatch: (text) => theme.fg("warning", text),
+			},
+		};
+		const editor = new Editor(tui, editorTheme);
+		let screenIndex = 0;
+		let editing = false;
+		let cachedLines: string[] | undefined;
+
+		const refresh = () => {
+			cachedLines = undefined;
+			tui.requestRender();
+		};
+
+		const inReview = () => !single && screenIndex === questions.length;
+		const currentQuestion = () => questions[screenIndex];
+		const currentAnswer = () => answers[screenIndex];
+		const currentSelection = () => selections[screenIndex] ?? 0;
+		const currentOptions = (): DisplayOption[] => {
+			const question = currentQuestion();
+			if (!question) {
+				return [];
+			}
+
+			return question.allowCustom
+				? [
+						...question.options,
+						{
+							label: CUSTOM_LABEL,
+							description: CUSTOM_DESCRIPTION,
+							isCustom: true,
+						},
+					]
+				: [...question.options];
+		};
+
+		const finish = (status: ToolDetails["status"]) => {
+			done({
+				status,
+				questions: detailsQuestions,
+				answers: answers.filter(
+					(answer): answer is AnswerDetails => answer !== undefined,
+				),
+			});
+		};
+
+		const submitAnswer = (answer: AnswerDetails) => {
+			answers[answer.questionIndex] = answer;
+			if (single) {
+				finish("answered");
+				return;
+			}
+
+			screenIndex = Math.min(questions.length, answer.questionIndex + 1);
+			refresh();
+		};
+
+		const goBack = () => {
+			if (screenIndex === 0) {
+				return;
+			}
+
+			editing = false;
+			screenIndex -= 1;
+			refresh();
+		};
+
+		const chooseSelection = () => {
+			const question = currentQuestion();
+			const optionIndex = currentSelection();
+			const option = currentOptions()[optionIndex];
+			if (!question || !option) {
+				return;
+			}
+
+			selections[screenIndex] = optionIndex;
+			if (option.isCustom) {
+				editing = true;
+				editor.setText(
+					drafts[screenIndex] ||
+						(currentAnswer()?.wasCustom ? currentAnswer()?.answer : "") ||
+						"",
+				);
+				refresh();
+				return;
+			}
+
+			submitAnswer({
+				questionIndex: screenIndex,
+				header: question.header,
+				question: question.question,
+				answer: option.label,
+				wasCustom: false,
+				optionIndex: optionIndex + 1,
+			});
+		};
+
+		editor.onSubmit = (value) => {
+			const question = currentQuestion();
+			const answer = value.trim();
+			if (!question || !answer) {
+				editing = false;
+				editor.setText("");
+				refresh();
+				return;
+			}
+
+			drafts[screenIndex] = answer;
+			editing = false;
+			editor.setText("");
+			submitAnswer({
+				questionIndex: screenIndex,
+				header: question.header,
+				question: question.question,
+				answer,
+				wasCustom: true,
+			});
+		};
+
+		const frame = (width: number, body: string[], footer: string) => {
+			const lines = [theme.fg("accent", "─".repeat(width)), ...body, ""];
+			lines.push(truncateToWidth(theme.fg("dim", footer), width));
+			lines.push(theme.fg("accent", "─".repeat(width)));
+			return lines;
+		};
+
+		const renderQuestion = (width: number) => {
+			const question = currentQuestion();
+			if (!question) {
+				return [];
+			}
+
+			const selectedIndex = currentSelection();
+			const body = [
+				truncateToWidth(
+					theme.fg("toolTitle", theme.bold(" ask_questions ")) +
+						theme.fg(
+							"muted",
+							`${screenIndex + 1}/${questions.length} • ${question.header}`,
+						),
+					width,
+				),
+				truncateToWidth(theme.fg("text", ` ${question.question}`), width),
+				"",
+			];
+
+			for (const [index, option] of currentOptions().entries()) {
+				const active = index === selectedIndex;
+				const picked = option.isCustom
+					? currentAnswer()?.wasCustom === true
+					: currentAnswer()?.answer === option.label;
+				const prefix = active ? theme.fg("accent", "> ") : "  ";
+				const color = active ? "accent" : picked ? "success" : "text";
+				body.push(
+					truncateToWidth(
+						prefix + theme.fg(color, `${index + 1}. ${option.label}`),
+						width,
+					),
+				);
+				if (option.description) {
+					body.push(
+						truncateToWidth(
+							`   ${theme.fg("muted", option.description)}`,
+							width,
+						),
+					);
+				}
+				if (option.isCustom && !editing && drafts[screenIndex]) {
+					body.push(
+						truncateToWidth(
+							`   ${theme.fg("muted", drafts[screenIndex] ?? "")}`,
+							width,
+						),
+					);
+				}
+				if (option.isCustom && editing && active) {
+					for (const line of editor.render(width - 3)) {
+						body.push(truncateToWidth(`   ${line}`, width));
+					}
+				}
+			}
+
+			const footer = editing
+				? " Enter submit • Esc back"
+				: ` ↑↓/jk navigate • 1-9 select • Enter choose${screenIndex > 0 ? " • ←/h back" : ""} • Esc cancel`;
+			return frame(width, body, footer);
+		};
+
+		const renderReview = (width: number) => {
+			const body = [
+				truncateToWidth(
+					theme.fg("toolTitle", theme.bold(" ask_questions ")) +
+						theme.fg("muted", "Review"),
+					width,
+				),
+				truncateToWidth(
+					theme.fg("text", " Review your answers before submitting."),
+					width,
+				),
+				"",
+			];
+
+			for (const [index, question] of questions.entries()) {
+				body.push(
+					truncateToWidth(theme.fg("muted", ` ${question.header}`), width),
+				);
+				body.push(
+					truncateToWidth(
+						theme.fg("text", ` ${answers[index]?.answer || "(unanswered)"}`),
+						width,
+					),
+				);
+				body.push("");
+			}
+
+			return frame(width, body, " Enter submit • ←/h back • Esc cancel");
+		};
+
+		function handleInput(data: string) {
+			if (editing) {
+				if (matchesKey(data, Key.escape)) {
+					editing = false;
+					editor.setText("");
+					refresh();
+					return;
+				}
+
+				editor.handleInput(data);
+				refresh();
+				return;
+			}
+
+			if (inReview()) {
+				if (matchesKey(data, Key.enter)) {
+					finish("answered");
+					return;
+				}
+				if (matchesKey(data, Key.left) || data === "h") {
+					goBack();
+					return;
+				}
+				if (matchesKey(data, Key.escape)) {
+					finish("cancelled");
+				}
+				return;
+			}
+
+			const selectedIndex = currentSelection();
+			const options = currentOptions();
+			for (let index = 0; index < Math.min(options.length, 9); index++) {
+				if (data === String(index + 1)) {
+					selections[screenIndex] = index;
+					chooseSelection();
+					return;
+				}
+			}
+
+			if (matchesKey(data, Key.up) || data === "k") {
+				selections[screenIndex] = Math.max(0, selectedIndex - 1);
+				refresh();
+				return;
+			}
+			if (matchesKey(data, Key.down) || data === "j") {
+				selections[screenIndex] = Math.min(
+					options.length - 1,
+					selectedIndex + 1,
+				);
+				refresh();
+				return;
+			}
+			if (matchesKey(data, Key.left) || data === "h") {
+				goBack();
+				return;
+			}
+			if (matchesKey(data, Key.enter)) {
+				chooseSelection();
+				return;
+			}
+			if (matchesKey(data, Key.escape)) {
+				finish("cancelled");
+			}
+		}
+
+		return {
+			render(width: number) {
+				if (!cachedLines) {
+					cachedLines = inReview()
+						? renderReview(width)
+						: renderQuestion(width);
+				}
+				return cachedLines;
+			},
+			invalidate() {
+				cachedLines = undefined;
+			},
+			handleInput,
+		};
+	});
+}
+
+/**
+ * Registers the minimal `ask_questions` Pi extension.
+ *
+ * The tool is intentionally narrow: single-choice questions, optional custom
+ * answers, small input limits, and a compact blocking TUI flow.
+ */
 export default function askQuestionsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ask_questions",
@@ -110,395 +501,24 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 		],
 		parameters: AskQuestionsParams,
 		executionMode: "sequential",
-
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const questions = params.questions.map((question, index) => ({
-				header: question.header?.trim() || `Q${index + 1}`,
-				question: question.question,
-				options: question.options,
-				allowCustom: question.allowCustom !== false,
-			}));
-			const detailsQuestions: QuestionDetails[] = questions.map((question) => ({
-				header: question.header,
-				question: question.question,
-				options: question.options.map((option) => option.label),
-				allowCustom: question.allowCustom,
-			}));
-
+			const questions = normalizeQuestions(params.questions);
+			const detailsQuestions = toQuestionDetails(questions);
 			if (!ctx.hasUI) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "ask_questions requires the interactive TUI. Ask the user in chat instead.",
-						},
-					],
-					details: {
-						status: "unavailable",
-						questions: detailsQuestions,
-						answers: [],
-					} satisfies ToolDetails,
-				};
+				return textResult(UNAVAILABLE_TEXT, {
+					status: "unavailable",
+					questions: detailsQuestions,
+					answers: [],
+				});
 			}
 
-			const result = await ctx.ui.custom<ToolDetails>(
-				(tui, theme, _kb, done) => {
-					const single = questions.length === 1;
-					const answers: Array<AnswerDetails | undefined> = new Array(
-						questions.length,
-					);
-					const selectedIndices = new Array<number>(questions.length).fill(0);
-					const drafts = new Array<string>(questions.length).fill("");
-					let screenIndex = 0;
-					let editing = false;
-					let cachedLines: string[] | undefined;
-
-					const editorTheme: EditorTheme = {
-						borderColor: (text) => theme.fg("accent", text),
-						selectList: {
-							selectedPrefix: (text) => theme.fg("accent", text),
-							selectedText: (text) => theme.fg("accent", text),
-							description: (text) => theme.fg("muted", text),
-							scrollInfo: (text) => theme.fg("dim", text),
-							noMatch: (text) => theme.fg("warning", text),
-						},
-					};
-					const editor = new Editor(tui, editorTheme);
-
-					const refresh = () => {
-						cachedLines = undefined;
-						tui.requestRender();
-					};
-
-					const isReview = () => !single && screenIndex === questions.length;
-
-					const getOptions = (questionIndex: number): DisplayOption[] => {
-						const question = questions[questionIndex];
-						if (!question) {
-							return [];
-						}
-
-						return question.allowCustom
-							? [
-									...question.options,
-									{
-										label: "Type your own answer",
-										description: "Write a short custom answer.",
-										isCustom: true,
-									},
-								]
-							: [...question.options];
-					};
-
-					const finish = (status: ToolDetails["status"]) => {
-						done({
-							status,
-							questions: detailsQuestions,
-							answers: answers.filter(
-								(answer): answer is AnswerDetails => answer !== undefined,
-							),
-						});
-					};
-
-					const moveBack = () => {
-						if (screenIndex === 0) {
-							return;
-						}
-
-						editing = false;
-						screenIndex = Math.max(0, screenIndex - 1);
-						refresh();
-					};
-
-					const answerQuestion = (
-						questionIndex: number,
-						optionIndex: number,
-					) => {
-						const question = questions[questionIndex];
-						const option = getOptions(questionIndex)[optionIndex];
-						if (!question || !option) {
-							return;
-						}
-
-						selectedIndices[questionIndex] = optionIndex;
-						if (option.isCustom) {
-							editing = true;
-							editor.setText(
-								drafts[questionIndex] ||
-									(answers[questionIndex]?.wasCustom
-										? answers[questionIndex]?.answer
-										: "") ||
-									"",
-							);
-							refresh();
-							return;
-						}
-
-						answers[questionIndex] = {
-							questionIndex,
-							header: question.header,
-							question: question.question,
-							answer: option.label,
-							wasCustom: false,
-							optionIndex: optionIndex + 1,
-						};
-
-						if (single) {
-							finish("answered");
-							return;
-						}
-
-						screenIndex =
-							questionIndex === questions.length - 1
-								? questions.length
-								: questionIndex + 1;
-						refresh();
-					};
-
-					editor.onSubmit = (value) => {
-						const question = questions[screenIndex];
-						const trimmed = value.trim();
-						if (!question) {
-							editing = false;
-							editor.setText("");
-							refresh();
-							return;
-						}
-
-						if (!trimmed) {
-							editing = false;
-							editor.setText("");
-							refresh();
-							return;
-						}
-
-						drafts[screenIndex] = trimmed;
-						answers[screenIndex] = {
-							questionIndex: screenIndex,
-							header: question.header,
-							question: question.question,
-							answer: trimmed,
-							wasCustom: true,
-						};
-						editor.setText("");
-						editing = false;
-
-						if (single) {
-							finish("answered");
-							return;
-						}
-
-						screenIndex =
-							screenIndex === questions.length - 1
-								? questions.length
-								: screenIndex + 1;
-						refresh();
-					};
-
-					const renderQuestion = (width: number) => {
-						const question = questions[screenIndex];
-						const options = getOptions(screenIndex);
-						const selectedIndex = selectedIndices[screenIndex] ?? 0;
-						const lines: string[] = [];
-						const add = (text: string) => {
-							lines.push(truncateToWidth(text, width));
-						};
-
-						if (!question) {
-							return lines;
-						}
-
-						add(theme.fg("accent", "─".repeat(width)));
-						add(
-							theme.fg("toolTitle", theme.bold(" ask_questions ")) +
-								theme.fg(
-									"muted",
-									`${screenIndex + 1}/${questions.length} • ${question.header}`,
-								),
-						);
-						add(theme.fg("text", ` ${question.question}`));
-						lines.push("");
-
-						for (let index = 0; index < options.length; index++) {
-							const option = options[index];
-							if (!option) {
-								continue;
-							}
-
-							const active = index === selectedIndex;
-							const picked = option.isCustom
-								? answers[screenIndex]?.wasCustom === true
-								: answers[screenIndex]?.answer === option.label;
-							const prefix = active ? theme.fg("accent", "> ") : "  ";
-							const label = `${index + 1}. ${option.label}`;
-							const color = active ? "accent" : picked ? "success" : "text";
-
-							add(prefix + theme.fg(color, label));
-							if (option.description) {
-								add(`   ${theme.fg("muted", option.description)}`);
-							}
-							if (option.isCustom && !editing) {
-								const draft = drafts[screenIndex] ?? "";
-								if (draft) {
-									add(`   ${theme.fg("muted", draft)}`);
-								}
-							}
-							if (option.isCustom && editing && active) {
-								for (const line of editor.render(width - 3)) {
-									add(`   ${line}`);
-								}
-							}
-						}
-
-						lines.push("");
-						if (editing) {
-							add(theme.fg("dim", " Enter submit • Esc back"));
-						} else {
-							const backHint = screenIndex > 0 ? " • ←/h back" : "";
-							add(
-								theme.fg(
-									"dim",
-									` ↑↓/jk navigate • 1-9 select • Enter/l choose${backHint} • Esc cancel`,
-								),
-							);
-						}
-						add(theme.fg("accent", "─".repeat(width)));
-
-						return lines;
-					};
-
-					const renderReview = (width: number) => {
-						const lines: string[] = [];
-						const add = (text: string) => {
-							lines.push(truncateToWidth(text, width));
-						};
-
-						add(theme.fg("accent", "─".repeat(width)));
-						add(
-							theme.fg("toolTitle", theme.bold(" ask_questions ")) +
-								theme.fg("muted", "Review"),
-						);
-						add(theme.fg("text", " Review your answers before submitting."));
-						lines.push("");
-
-						for (let index = 0; index < questions.length; index++) {
-							const question = questions[index];
-							const answer = answers[index];
-							if (!question) {
-								continue;
-							}
-
-							add(theme.fg("muted", ` ${question.header}`));
-							add(theme.fg("text", ` ${answer?.answer || "(unanswered)"}`));
-							lines.push("");
-						}
-
-						add(theme.fg("dim", " Enter/l submit • ←/h back • Esc cancel"));
-						add(theme.fg("accent", "─".repeat(width)));
-						return lines;
-					};
-
-					function handleInput(data: string) {
-						if (editing) {
-							if (matchesKey(data, Key.escape)) {
-								editing = false;
-								editor.setText("");
-								refresh();
-								return;
-							}
-
-							editor.handleInput(data);
-							refresh();
-							return;
-						}
-
-						if (isReview()) {
-							if (matchesKey(data, Key.enter) || data === "l") {
-								finish("answered");
-								return;
-							}
-							if (matchesKey(data, Key.left) || data === "h") {
-								moveBack();
-								return;
-							}
-							if (matchesKey(data, Key.escape)) {
-								finish("cancelled");
-							}
-							return;
-						}
-
-						const options = getOptions(screenIndex);
-						const selectedIndex = selectedIndices[screenIndex] ?? 0;
-						for (let index = 0; index < Math.min(options.length, 9); index++) {
-							if (data === String(index + 1)) {
-								answerQuestion(screenIndex, index);
-								return;
-							}
-						}
-
-						if (matchesKey(data, Key.up) || data === "k") {
-							selectedIndices[screenIndex] = Math.max(0, selectedIndex - 1);
-							refresh();
-							return;
-						}
-						if (matchesKey(data, Key.down) || data === "j") {
-							selectedIndices[screenIndex] = Math.min(
-								options.length - 1,
-								selectedIndex + 1,
-							);
-							refresh();
-							return;
-						}
-						if (matchesKey(data, Key.left) || data === "h") {
-							moveBack();
-							return;
-						}
-						if (matchesKey(data, Key.enter) || data === "l") {
-							answerQuestion(screenIndex, selectedIndex);
-							return;
-						}
-						if (matchesKey(data, Key.escape)) {
-							finish("cancelled");
-						}
-					}
-
-					return {
-						render(width: number) {
-							if (!cachedLines) {
-								cachedLines = isReview()
-									? renderReview(width)
-									: renderQuestion(width);
-							}
-							return cachedLines;
-						},
-						invalidate() {
-							cachedLines = undefined;
-						},
-						handleInput,
-					};
-				},
-			);
-
-			if (result.status === "cancelled") {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "The user dismissed the questions without submitting answers.",
-						},
-					],
-					details: result,
-				};
+			const details = await askQuestionsInTui(ctx, questions, detailsQuestions);
+			if (details.status === "cancelled") {
+				return textResult(CANCELLED_TEXT, details);
 			}
 
-			return {
-				content: [
-					{ type: "text", text: `User answers: ${summarize(result)}.` },
-				],
-				details: result,
-			};
+			return textResult(`User answers: ${summarize(details)}.`, details);
 		},
-
 		renderCall(args, theme) {
 			const questions = Array.isArray(args.questions)
 				? (args.questions as InputQuestion[])
@@ -513,18 +533,15 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 				);
 			return new Text(text, 0, 0);
 		},
-
 		renderResult(result, _options, theme) {
 			const details = result.details as ToolDetails | undefined;
 			if (!details) {
 				const content = result.content[0];
 				return new Text(content?.type === "text" ? content.text : "", 0, 0);
 			}
-
 			if (details.status === "unavailable") {
 				return new Text(theme.fg("warning", "UI unavailable"), 0, 0);
 			}
-
 			if (details.status === "cancelled") {
 				return new Text(theme.fg("warning", "Cancelled"), 0, 0);
 			}

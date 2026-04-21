@@ -10,20 +10,22 @@ Minimal Pi package that adds a structured `ask_questions` tool.
 pi install npm:pi-questions
 ```
 
-## Why
+## Philosophy
 
-Sometimes Pi needs input from the user. The user, yes you, don't want to type it in. This is the tool for that.
+Small, obvious, boring.
 
-## Demo / screenshot
+This package gives Pi one compact way to ask users structured questions in a TUI. The stable contract is the bounded schema and interaction flow. Prompt copy stays intentionally small and tunable.
 
-`ask_questions` running inside Pi's interactive TUI:
+## Non-goals
 
-![ask_questions demo screenshot](./assets/ask-questions-demo.png)
+- survey engine
+- workflow builder
+- forms platform
+- feature growth that adds more surface area than it removes
 
 ## What it does
 
 - asks one or more structured questions in Pi's interactive TUI
-- keeps the flow tight: `j/k` or arrows move, `h` goes back, `Enter/l` selects, `Esc` cancels
 - supports single-choice options plus an optional custom answer
 - uses a final review step for multi-question runs
 - returns graceful non-error results for cancel and non-interactive sessions

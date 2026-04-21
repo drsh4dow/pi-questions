@@ -1,7 +1,7 @@
 {
 	"name": "pi-questions",
 	"version": "0.1.2",
-	"description": "Structured ask_questions tool for Pi planning and clarification flows",
+	"description": "Minimal ask_questions tool for Pi",
 	"type": "module",
 	"author": "drsh4dow <daniel.morettiv@gmail.com> (https://github.com/drsh4dow)",
 	"repository": {
@@ -23,8 +23,8 @@
 		"pi",
 		"questions",
 		"tui",
-		"planning",
-		"clarification"
+		"minimal",
+		"structured-input"
 	],
 	"pi": {
 		"extensions": [

@@ -34,7 +34,7 @@ const OptionSchema = Type.Object({
 		Type.String({
 			minLength: 1,
 			maxLength: 240,
-			description: "Optional short explanation for the option",
+			description: "Optional short explanation",
 		}),
 	),
 });
@@ -44,19 +44,18 @@ const QuestionSchema = Type.Object({
 		Type.String({
 			minLength: 1,
 			maxLength: 50,
-			description:
-				"Short label used in progress and review, e.g. Scope or Priority",
+			description: "Short progress label",
 		}),
 	),
 	question: Type.String({
 		minLength: 1,
 		maxLength: 500,
-		description: "Complete question to ask the user",
+		description: "Question shown to the user",
 	}),
 	options: Type.Array(OptionSchema, {
 		minItems: 1,
 		maxItems: 8,
-		description: "Available choices. Keep the list short and concrete.",
+		description: "Short concrete choices.",
 	}),
 	allowCustom: Type.Optional(
 		Type.Boolean({
@@ -70,7 +69,7 @@ const AskQuestionsParams = Type.Object({
 	questions: Type.Array(QuestionSchema, {
 		minItems: 1,
 		maxItems: 6,
-		description: "Ordered questions to ask. Keep this small.",
+		description: "Ordered questions.",
 	}),
 });
 
@@ -451,23 +450,19 @@ async function askQuestionsInTui(
 /**
  * Registers the minimal `ask_questions` Pi extension.
  *
- * The tool is intentionally narrow: single-choice questions, optional custom
- * answers, bounded input limits, and a compact blocking TUI flow.
+ * The stable contract is the schema and TUI flow. Prompt copy stays small and
+ * tunable.
  */
 export default function askQuestionsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: TOOL_NAME,
 		label: "Ask Questions",
 		description:
-			"Ask the user one or more structured questions in the interactive TUI. Prefer this over free-form chat whenever requirements, preferences, constraints, confirmations, or plan-shaping decisions are missing.",
-		promptSnippet:
-			"Ask the user structured questions to clarify requirements, gather preferences, and unblock planning or implementation.",
+			"Ask the user structured questions in the interactive TUI. Default to this for direct user questions when structured input helps.",
+		promptSnippet: "Ask structured questions for missing user input.",
 		promptGuidelines: [
-			"Use this tool whenever user input would change the plan, implementation, priorities, or acceptance criteria. Do not guess when a short question can resolve uncertainty.",
-			"When planning, ask this tool first for missing requirements, tradeoffs, constraints, or preferences before finalizing the plan.",
-			"Batch related questions into one ask_questions call instead of asking them one-by-one in chat.",
-			"Prefer short concrete option lists. Put your recommended option first and append '(Recommended)' when applicable.",
-			"If you are about to ask the user a question in natural language, strongly prefer this tool instead.",
+			"Use this for direct user questions unless the question is trivial, rhetorical, or only a lightweight next-step question at the end of a normal answer.",
+			"Batch related questions. Keep options short and concrete, and put the recommended option first when helpful.",
 		],
 		parameters: AskQuestionsParams,
 		executionMode: "sequential",

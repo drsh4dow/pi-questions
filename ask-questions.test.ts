@@ -40,7 +40,7 @@ function createTheme() {
 	};
 }
 
-test("registers a planning-first ask_questions tool with bounded schema limits", () => {
+test("registers a small broadly positioned ask_questions tool without pinning exact prompt copy", () => {
 	const tool = getTool();
 	const parameters = tool.parameters as unknown as {
 		properties: {
@@ -67,24 +67,29 @@ test("registers a planning-first ask_questions tool with bounded schema limits",
 	const questions = parameters.properties.questions;
 	const questionProps = questions.items.properties;
 	const optionProps = questionProps.options.items.properties;
+	const promptGuidelines = tool.promptGuidelines ?? [];
+	const promptGuidelineText = promptGuidelines.join(" ").toLowerCase();
 
 	expect(tool.name).toBe("ask_questions");
 	expect(tool.label).toBe("Ask Questions");
 	expect(tool.executionMode).toBe("sequential");
-	expect(tool.description).toContain("Prefer this over free-form chat");
-	expect(tool.promptSnippet).toContain("unblock planning or implementation");
-	expect(tool.promptGuidelines).toContain(
-		"When planning, ask this tool first for missing requirements, tradeoffs, constraints, or preferences before finalizing the plan.",
-	);
-	expect(tool.promptGuidelines).toContain(
-		"If you are about to ask the user a question in natural language, strongly prefer this tool instead.",
-	);
+	expect(tool.description).toContain("structured questions");
+	expect(tool.description).toContain("interactive TUI");
+	expect(tool.description).toContain("direct user questions");
+	expect(tool.promptSnippet).toContain("missing user input");
+	expect(promptGuidelines).toHaveLength(2);
+	expect(promptGuidelineText).toContain("trivial");
+	expect(promptGuidelineText).toContain("rhetorical");
+	expect(promptGuidelineText).toContain("lightweight next-step question");
+	expect(promptGuidelineText).toContain("batch");
+	expect(promptGuidelineText).toContain("recommended option first");
+	expect(promptGuidelineText).not.toContain("planning");
 	expect(questions.minItems).toBe(1);
 	expect(questions.maxItems).toBe(6);
-	expect(questionProps.header.maxLength).toBe(80);
-	expect(questionProps.question.maxLength).toBe(2000);
-	expect(optionProps.label.maxLength).toBe(160);
-	expect(optionProps.description.maxLength).toBe(320);
+	expect(questionProps.header.maxLength).toBe(50);
+	expect(questionProps.question.maxLength).toBe(500);
+	expect(optionProps.label.maxLength).toBe(120);
+	expect(optionProps.description.maxLength).toBe(240);
 });
 
 test("returns a graceful unavailable result when interactive UI is missing", async () => {

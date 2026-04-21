@@ -13,12 +13,13 @@ import {
 } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 
-const CUSTOM_LABEL = "Type your own answer";
-const CUSTOM_DESCRIPTION = "Write a short custom answer.";
+const CUSTOM_LABEL = "Write your own answer";
+const CUSTOM_DESCRIPTION = "Open a small text box.";
 const UNAVAILABLE_TEXT =
 	"ask_questions requires the interactive TUI. Ask the user in chat instead.";
 const CANCELLED_TEXT =
 	"The user dismissed the questions without submitting answers.";
+const TOOL_TITLE = " ask_questions ";
 
 const OptionSchema = Type.Object({
 	label: Type.String({
@@ -129,9 +130,7 @@ function toQuestionDetails(questions: NormalizedQuestion[]): QuestionDetails[] {
 	}));
 }
 
-/**
- * Builds the standard text content for a tool result.
- */
+/** Builds the standard text content for a tool result. */
 function textResult(
 	text: string,
 	details: ToolDetails,
@@ -151,6 +150,13 @@ function summarize(details: ToolDetails): string {
 	return details.answers
 		.map((answer) => `"${answer.question}"="${answer.answer}"`)
 		.join(", ");
+}
+
+/** Formats a persisted answer for compact result rendering. */
+function formatAnswer(answer: AnswerDetails): string {
+	return answer.wasCustom
+		? `${answer.header}: ${answer.answer}`
+		: `${answer.header}: ${answer.optionIndex}. ${answer.answer}`;
 }
 
 /**
@@ -174,7 +180,7 @@ async function askQuestionsInTui(
 		const drafts = new Array<string>(questions.length).fill("");
 		const selections = new Array<number>(questions.length).fill(0);
 		const single = questions.length === 1;
-		const editorTheme: EditorTheme = {
+		const editor = new Editor(tui, {
 			borderColor: (text) => theme.fg("accent", text),
 			selectList: {
 				selectedPrefix: (text) => theme.fg("accent", text),
@@ -183,8 +189,7 @@ async function askQuestionsInTui(
 				scrollInfo: (text) => theme.fg("dim", text),
 				noMatch: (text) => theme.fg("warning", text),
 			},
-		};
-		const editor = new Editor(tui, editorTheme);
+		} satisfies EditorTheme);
 		let screenIndex = 0;
 		let editing = false;
 		let cachedLines: string[] | undefined;
@@ -193,13 +198,16 @@ async function askQuestionsInTui(
 			cachedLines = undefined;
 			tui.requestRender();
 		};
-
+		const isUp = (data: string) => matchesKey(data, Key.up) || data === "k";
+		const isDown = (data: string) => matchesKey(data, Key.down) || data === "j";
+		const isBack = (data: string) => matchesKey(data, Key.left) || data === "h";
+		const isConfirm = (data: string) => matchesKey(data, Key.enter);
 		const inReview = () => !single && screenIndex === questions.length;
 		const currentQuestion = () => questions[screenIndex];
 		const currentAnswer = () => answers[screenIndex];
 		const currentSelection = () => selections[screenIndex] ?? 0;
-		const currentOptions = (): DisplayOption[] => {
-			const question = currentQuestion();
+		const optionsAt = (index: number): DisplayOption[] => {
+			const question = questions[index];
 			if (!question) {
 				return [];
 			}
@@ -215,8 +223,8 @@ async function askQuestionsInTui(
 					]
 				: [...question.options];
 		};
-
-		const finish = (status: ToolDetails["status"]) => {
+		const currentOptions = () => optionsAt(screenIndex);
+		const finish = (status: ToolDetails["status"]) =>
 			done({
 				status,
 				questions: detailsQuestions,
@@ -224,7 +232,12 @@ async function askQuestionsInTui(
 					(answer): answer is AnswerDetails => answer !== undefined,
 				),
 			});
+		const clearEditor = () => {
+			editing = false;
+			editor.setText("");
 		};
+		const title = (text: string) =>
+			theme.fg("toolTitle", theme.bold(TOOL_TITLE)) + theme.fg("muted", text);
 
 		const submitAnswer = (answer: AnswerDetails) => {
 			answers[answer.questionIndex] = answer;
@@ -237,13 +250,13 @@ async function askQuestionsInTui(
 			refresh();
 		};
 
-		const goBack = () => {
-			if (screenIndex === 0) {
-				return;
-			}
-
-			editing = false;
-			screenIndex -= 1;
+		const startEditing = () => {
+			editing = true;
+			editor.setText(
+				drafts[screenIndex] ||
+					(currentAnswer()?.wasCustom ? currentAnswer()?.answer : "") ||
+					"",
+			);
 			refresh();
 		};
 
@@ -257,13 +270,7 @@ async function askQuestionsInTui(
 
 			selections[screenIndex] = optionIndex;
 			if (option.isCustom) {
-				editing = true;
-				editor.setText(
-					drafts[screenIndex] ||
-						(currentAnswer()?.wasCustom ? currentAnswer()?.answer : "") ||
-						"",
-				);
-				refresh();
+				startEditing();
 				return;
 			}
 
@@ -277,19 +284,27 @@ async function askQuestionsInTui(
 			});
 		};
 
+		const goBack = () => {
+			if (screenIndex === 0) {
+				return;
+			}
+
+			editing = false;
+			screenIndex -= 1;
+			refresh();
+		};
+
 		editor.onSubmit = (value) => {
 			const question = currentQuestion();
 			const answer = value.trim();
 			if (!question || !answer) {
-				editing = false;
-				editor.setText("");
+				clearEditor();
 				refresh();
 				return;
 			}
 
 			drafts[screenIndex] = answer;
-			editing = false;
-			editor.setText("");
+			clearEditor();
 			submitAnswer({
 				questionIndex: screenIndex,
 				header: question.header,
@@ -299,110 +314,71 @@ async function askQuestionsInTui(
 			});
 		};
 
-		const frame = (width: number, body: string[], footer: string) => {
-			const lines = [theme.fg("accent", "─".repeat(width)), ...body, ""];
-			lines.push(truncateToWidth(theme.fg("dim", footer), width));
-			lines.push(theme.fg("accent", "─".repeat(width)));
-			return lines;
-		};
+		function render(width: number) {
+			const lines = [theme.fg("accent", "─".repeat(width))];
+			const add = (text = "") => lines.push(truncateToWidth(text, width));
 
-		const renderQuestion = (width: number) => {
-			const question = currentQuestion();
-			if (!question) {
-				return [];
+			if (inReview()) {
+				add(title("Review answers"));
+				add(theme.fg("text", " One last look before submitting."));
+				add();
+				for (const [index, question] of questions.entries()) {
+					add(theme.fg("muted", ` ${question.header}`));
+					add(theme.fg("text", ` ${answers[index]?.answer || "(unanswered)"}`));
+					add();
+				}
+				add(theme.fg("dim", " Enter submit • h/← back • Esc cancel"));
+				lines.push(theme.fg("accent", "─".repeat(width)));
+				return lines;
 			}
 
-			const selectedIndex = currentSelection();
-			const body = [
-				truncateToWidth(
-					theme.fg("toolTitle", theme.bold(" ask_questions ")) +
-						theme.fg(
-							"muted",
-							`${screenIndex + 1}/${questions.length} • ${question.header}`,
-						),
-					width,
-				),
-				truncateToWidth(theme.fg("text", ` ${question.question}`), width),
-				"",
-			];
+			const question = currentQuestion();
+			if (!question) {
+				return lines;
+			}
+
+			add(title(`${screenIndex + 1}/${questions.length} • ${question.header}`));
+			add(theme.fg("text", ` ${question.question}`));
+			add();
 
 			for (const [index, option] of currentOptions().entries()) {
-				const active = index === selectedIndex;
+				const active = index === currentSelection();
 				const picked = option.isCustom
 					? currentAnswer()?.wasCustom === true
 					: currentAnswer()?.answer === option.label;
 				const prefix = active ? theme.fg("accent", "> ") : "  ";
 				const color = active ? "accent" : picked ? "success" : "text";
-				body.push(
-					truncateToWidth(
-						prefix + theme.fg(color, `${index + 1}. ${option.label}`),
-						width,
-					),
-				);
+				add(prefix + theme.fg(color, `${index + 1}. ${option.label}`));
 				if (option.description) {
-					body.push(
-						truncateToWidth(
-							`   ${theme.fg("muted", option.description)}`,
-							width,
-						),
-					);
+					add(`   ${theme.fg("muted", option.description)}`);
 				}
 				if (option.isCustom && !editing && drafts[screenIndex]) {
-					body.push(
-						truncateToWidth(
-							`   ${theme.fg("muted", drafts[screenIndex] ?? "")}`,
-							width,
-						),
-					);
+					add(`   ${theme.fg("muted", drafts[screenIndex] ?? "")}`);
 				}
 				if (option.isCustom && editing && active) {
 					for (const line of editor.render(width - 3)) {
-						body.push(truncateToWidth(`   ${line}`, width));
+						add(`   ${line}`);
 					}
 				}
 			}
 
-			const footer = editing
-				? " Enter submit • Esc back"
-				: ` ↑↓/jk navigate • 1-9 select • Enter choose${screenIndex > 0 ? " • ←/h back" : ""} • Esc cancel`;
-			return frame(width, body, footer);
-		};
-
-		const renderReview = (width: number) => {
-			const body = [
-				truncateToWidth(
-					theme.fg("toolTitle", theme.bold(" ask_questions ")) +
-						theme.fg("muted", "Review"),
-					width,
+			add();
+			add(
+				theme.fg(
+					"dim",
+					editing
+						? " Type answer • Enter save • Esc back"
+						: ` jk/↑↓ move • 1-9 pick • Enter select${screenIndex > 0 ? " • h/← back" : ""} • Esc cancel`,
 				),
-				truncateToWidth(
-					theme.fg("text", " Review your answers before submitting."),
-					width,
-				),
-				"",
-			];
-
-			for (const [index, question] of questions.entries()) {
-				body.push(
-					truncateToWidth(theme.fg("muted", ` ${question.header}`), width),
-				);
-				body.push(
-					truncateToWidth(
-						theme.fg("text", ` ${answers[index]?.answer || "(unanswered)"}`),
-						width,
-					),
-				);
-				body.push("");
-			}
-
-			return frame(width, body, " Enter submit • ←/h back • Esc cancel");
-		};
+			);
+			lines.push(theme.fg("accent", "─".repeat(width)));
+			return lines;
+		}
 
 		function handleInput(data: string) {
 			if (editing) {
 				if (matchesKey(data, Key.escape)) {
-					editing = false;
-					editor.setText("");
+					clearEditor();
 					refresh();
 					return;
 				}
@@ -413,11 +389,11 @@ async function askQuestionsInTui(
 			}
 
 			if (inReview()) {
-				if (matchesKey(data, Key.enter)) {
+				if (isConfirm(data)) {
 					finish("answered");
 					return;
 				}
-				if (matchesKey(data, Key.left) || data === "h") {
+				if (isBack(data)) {
 					goBack();
 					return;
 				}
@@ -427,9 +403,11 @@ async function askQuestionsInTui(
 				return;
 			}
 
-			const selectedIndex = currentSelection();
-			const options = currentOptions();
-			for (let index = 0; index < Math.min(options.length, 9); index++) {
+			for (
+				let index = 0;
+				index < Math.min(currentOptions().length, 9);
+				index++
+			) {
 				if (data === String(index + 1)) {
 					selections[screenIndex] = index;
 					chooseSelection();
@@ -437,24 +415,24 @@ async function askQuestionsInTui(
 				}
 			}
 
-			if (matchesKey(data, Key.up) || data === "k") {
-				selections[screenIndex] = Math.max(0, selectedIndex - 1);
+			if (isUp(data)) {
+				selections[screenIndex] = Math.max(0, currentSelection() - 1);
 				refresh();
 				return;
 			}
-			if (matchesKey(data, Key.down) || data === "j") {
+			if (isDown(data)) {
 				selections[screenIndex] = Math.min(
-					options.length - 1,
-					selectedIndex + 1,
+					currentOptions().length - 1,
+					currentSelection() + 1,
 				);
 				refresh();
 				return;
 			}
-			if (matchesKey(data, Key.left) || data === "h") {
+			if (isBack(data)) {
 				goBack();
 				return;
 			}
-			if (matchesKey(data, Key.enter)) {
+			if (isConfirm(data)) {
 				chooseSelection();
 				return;
 			}
@@ -466,9 +444,7 @@ async function askQuestionsInTui(
 		return {
 			render(width: number) {
 				if (!cachedLines) {
-					cachedLines = inReview()
-						? renderReview(width)
-						: renderQuestion(width);
+					cachedLines = render(width);
 				}
 				return cachedLines;
 			},
@@ -513,11 +489,12 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 			}
 
 			const details = await askQuestionsInTui(ctx, questions, detailsQuestions);
-			if (details.status === "cancelled") {
-				return textResult(CANCELLED_TEXT, details);
-			}
-
-			return textResult(`User answers: ${summarize(details)}.`, details);
+			return textResult(
+				details.status === "cancelled"
+					? CANCELLED_TEXT
+					: `User answers: ${summarize(details)}.`,
+				details,
+			);
 		},
 		renderCall(args, theme) {
 			const questions = Array.isArray(args.questions)
@@ -525,13 +502,15 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 				: [];
 			const count = questions.length;
 			const preview = questions[0]?.question;
-			const text =
+			return new Text(
 				theme.fg("toolTitle", theme.bold("ask_questions ")) +
-				theme.fg(
-					"muted",
-					`${count} question${count === 1 ? "" : "s"}${preview ? ` • ${preview}` : ""}`,
-				);
-			return new Text(text, 0, 0);
+					theme.fg(
+						"muted",
+						`${count} question${count === 1 ? "" : "s"}${preview ? ` • ${preview}` : ""}`,
+					),
+				0,
+				0,
+			);
 		},
 		renderResult(result, _options, theme) {
 			const details = result.details as ToolDetails | undefined;
@@ -546,13 +525,17 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 				return new Text(theme.fg("warning", "Cancelled"), 0, 0);
 			}
 
-			const lines = details.answers.map((answer) => {
-				const label = answer.wasCustom
-					? `${answer.header}: ${answer.answer}`
-					: `${answer.header}: ${answer.optionIndex}. ${answer.answer}`;
-				return theme.fg("success", "✓ ") + theme.fg("accent", label);
-			});
-			return new Text(lines.join("\n"), 0, 0);
+			return new Text(
+				details.answers
+					.map(
+						(answer) =>
+							theme.fg("success", "✓ ") +
+							theme.fg("accent", formatAnswer(answer)),
+					)
+					.join("\n"),
+				0,
+				0,
+			);
 		},
 	});
 }

@@ -1,6 +1,6 @@
 {
 	"name": "pi-questions",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"description": "Minimal ask_questions tool for Pi",
 	"type": "module",
 	"author": "drsh4dow <daniel.morettiv@gmail.com> (https://github.com/drsh4dow)",

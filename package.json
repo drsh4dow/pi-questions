@@ -1,7 +1,17 @@
 {
 	"name": "pi-questions",
 	"version": "0.1.0",
+	"description": "Structured ask_questions tool for Pi planning and clarification flows",
 	"type": "module",
+	"author": "drsh4dow <daniel.morettiv@gmail.com> (https://github.com/drsh4dow)",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/drsh4dow/pi-questions.git"
+	},
+	"bugs": {
+		"url": "https://github.com/drsh4dow/pi-questions/issues"
+	},
+	"homepage": "https://github.com/drsh4dow/pi-questions#readme",
 	"scripts": {
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
@@ -9,7 +19,12 @@
 		"typecheck": "bunx tsc --noEmit"
 	},
 	"keywords": [
-		"pi-package"
+		"pi-package",
+		"pi",
+		"questions",
+		"tui",
+		"planning",
+		"clarification"
 	],
 	"pi": {
 		"extensions": [

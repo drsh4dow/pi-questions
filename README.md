@@ -1,6 +1,41 @@
 # pi-questions
 
-Minimal Pi package that adds an opencode-lite `ask_questions` tool.
+[![npm version](https://img.shields.io/npm/v/pi-questions.svg)](https://www.npmjs.com/package/pi-questions)
+
+Minimal Pi package that adds a structured `ask_questions` tool.
+
+## Install
+
+```bash
+pi install npm:pi-questions
+```
+
+For local development in this repo:
+
+```bash
+bun install
+```
+
+This repo also includes a project-local extension wrapper at `.pi/extensions/ask-questions.ts`, so Pi can pick it up and hot-reload it with `/reload` while you work here.
+
+## Version
+
+- npm: [`pi-questions`](https://www.npmjs.com/package/pi-questions)
+- source: [`drsh4dow/pi-questions`](https://github.com/drsh4dow/pi-questions)
+
+## Why use this?
+
+Use `ask_questions` when Pi should stop guessing and ask the user directly.
+
+- clarifies requirements before locking a plan
+- gathers preferences and constraints in one batch
+- keeps planning/implementation grounded in explicit user input
+- works better than scattering free-form clarification questions through chat
+- stays fast and keyboard-driven inside the TUI
+
+## Demo / screenshot
+
+Add a screenshot or short demo video here before publishing broadly. The Pi package gallery can use `pi.image` or `pi.video` metadata for better discoverability.
 
 ## What it does
 
@@ -10,16 +45,6 @@ Minimal Pi package that adds an opencode-lite `ask_questions` tool.
 - uses a final review step for multi-question runs
 - returns graceful non-error results for cancel and non-interactive sessions
 - documents the extension code with TSDoc comments for quick maintenance
-
-## Local development
-
-This repo includes a project-local extension wrapper at `.pi/extensions/ask-questions.ts`, so Pi can pick it up and hot-reload it with `/reload` while you work in this project.
-
-```bash
-bun install
-```
-
-Then start Pi in this repo and run `/reload` after changes.
 
 ## Package shape
 

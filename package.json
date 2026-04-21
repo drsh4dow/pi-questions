@@ -1,6 +1,6 @@
 {
 	"name": "pi-questions",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Structured ask_questions tool for Pi planning and clarification flows",
 	"type": "module",
 	"author": "drsh4dow <daniel.morettiv@gmail.com> (https://github.com/drsh4dow)",

@@ -330,9 +330,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 								? answers[screenIndex]?.wasCustom === true
 								: answers[screenIndex]?.answer === option.label;
 							const prefix = active ? theme.fg("accent", "> ") : "  ";
-							const label = option.isCustom
-								? `${index + 1}. ${option.label}`
-								: `${index + 1}. ${option.label}`;
+							const label = `${index + 1}. ${option.label}`;
 							const color = active ? "accent" : picked ? "success" : "text";
 
 							add(prefix + theme.fg(color, label));
@@ -356,11 +354,11 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 						if (editing) {
 							add(theme.fg("dim", " Enter submit • Esc back"));
 						} else {
-							const backHint = screenIndex > 0 ? " • ← back" : "";
+							const backHint = screenIndex > 0 ? " • ←/h back" : "";
 							add(
 								theme.fg(
 									"dim",
-									` ↑↓ navigate • 1-9 select • Enter choose${backHint} • Esc cancel`,
+									` ↑↓/jk navigate • 1-9 select • Enter/l choose${backHint} • Esc cancel`,
 								),
 							);
 						}
@@ -395,7 +393,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 							lines.push("");
 						}
 
-						add(theme.fg("dim", " Enter submit • ← back • Esc cancel"));
+						add(theme.fg("dim", " Enter/l submit • ←/h back • Esc cancel"));
 						add(theme.fg("accent", "─".repeat(width)));
 						return lines;
 					};
@@ -415,11 +413,11 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 						}
 
 						if (isReview()) {
-							if (matchesKey(data, Key.enter)) {
+							if (matchesKey(data, Key.enter) || data === "l") {
 								finish("answered");
 								return;
 							}
-							if (matchesKey(data, Key.left)) {
+							if (matchesKey(data, Key.left) || data === "h") {
 								moveBack();
 								return;
 							}
@@ -438,12 +436,12 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 							}
 						}
 
-						if (matchesKey(data, Key.up)) {
+						if (matchesKey(data, Key.up) || data === "k") {
 							selectedIndices[screenIndex] = Math.max(0, selectedIndex - 1);
 							refresh();
 							return;
 						}
-						if (matchesKey(data, Key.down)) {
+						if (matchesKey(data, Key.down) || data === "j") {
 							selectedIndices[screenIndex] = Math.min(
 								options.length - 1,
 								selectedIndex + 1,
@@ -451,11 +449,11 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 							refresh();
 							return;
 						}
-						if (matchesKey(data, Key.left)) {
+						if (matchesKey(data, Key.left) || data === "h") {
 							moveBack();
 							return;
 						}
-						if (matchesKey(data, Key.enter)) {
+						if (matchesKey(data, Key.enter) || data === "l") {
 							answerQuestion(screenIndex, selectedIndex);
 							return;
 						}

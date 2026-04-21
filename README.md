@@ -35,7 +35,9 @@ Use `ask_questions` when Pi should stop guessing and ask the user directly.
 
 ## Demo / screenshot
 
-Add a screenshot or short demo video here before publishing broadly. The Pi package gallery can use `pi.image` or `pi.video` metadata for better discoverability.
+`ask_questions` running inside Pi's interactive TUI:
+
+![ask_questions demo screenshot](./assets/ask-questions-demo.png)
 
 ## What it does
 

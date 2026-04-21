@@ -1,15 +1,59 @@
 # pi-questions
 
-To install dependencies:
+Minimal Pi package that adds an opencode-lite `ask_questions` tool.
+
+## What it does
+
+- asks one or more structured questions in Pi's interactive TUI
+- keeps the flow small and fast: arrows, enter, escape, numeric shortcuts
+- supports single-choice options plus an optional custom answer
+- uses a final review step for multi-question runs
+- returns graceful non-error results for cancel and non-interactive sessions
+
+## Local development
+
+This repo includes a project-local extension wrapper at `.pi/extensions/ask-questions.ts`, so Pi can pick it up and hot-reload it with `/reload` while you work in this project.
 
 ```bash
 bun install
 ```
 
-To run:
+Then start Pi in this repo and run `/reload` after changes.
 
-```bash
-bun run index.ts
+## Package shape
+
+The package exposes the extension via `package.json`:
+
+```json
+{
+  "pi": {
+    "extensions": ["./extensions/ask-questions.ts"]
+  }
+}
 ```
 
-This project was created using `bun init` in bun v1.3.12. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+## Tool shape
+
+`ask_questions` accepts a small ordered list of questions. Each question has:
+
+- `question`: full prompt shown to the user
+- `header?`: short review/progress label
+- `options`: short concrete choices
+- `allowCustom?`: whether to add `Type your own answer`
+
+Example:
+
+```ts
+{
+  questions: [
+    {
+      header: "Stack",
+      question: "Which stack should we use?",
+      options: [
+        { label: "Bun + TypeScript (Recommended)", description: "Smallest path" },
+        { label: "Node + TypeScript", description: "Use the more common runtime" }
+      ]
+    }
+  ]
+}
+```

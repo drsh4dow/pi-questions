@@ -27,13 +27,13 @@ const CANCELLED_TEXT =
 const OptionSchema = Type.Object({
 	label: Type.String({
 		minLength: 1,
-		maxLength: 160,
+		maxLength: 120,
 		description: "Display label for the option",
 	}),
 	description: Type.Optional(
 		Type.String({
 			minLength: 1,
-			maxLength: 320,
+			maxLength: 240,
 			description: "Optional short explanation for the option",
 		}),
 	),
@@ -43,14 +43,14 @@ const QuestionSchema = Type.Object({
 	header: Type.Optional(
 		Type.String({
 			minLength: 1,
-			maxLength: 80,
+			maxLength: 50,
 			description:
 				"Short label used in progress and review, e.g. Scope or Priority",
 		}),
 	),
 	question: Type.String({
 		minLength: 1,
-		maxLength: 2000,
+		maxLength: 500,
 		description: "Complete question to ask the user",
 	}),
 	options: Type.Array(OptionSchema, {

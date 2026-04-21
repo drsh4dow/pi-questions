@@ -10,6 +10,8 @@ import {
 	matchesKey,
 	Text,
 	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 
@@ -25,13 +27,13 @@ const CANCELLED_TEXT =
 const OptionSchema = Type.Object({
 	label: Type.String({
 		minLength: 1,
-		maxLength: 80,
+		maxLength: 160,
 		description: "Display label for the option",
 	}),
 	description: Type.Optional(
 		Type.String({
 			minLength: 1,
-			maxLength: 160,
+			maxLength: 320,
 			description: "Optional short explanation for the option",
 		}),
 	),
@@ -41,14 +43,14 @@ const QuestionSchema = Type.Object({
 	header: Type.Optional(
 		Type.String({
 			minLength: 1,
-			maxLength: 30,
+			maxLength: 80,
 			description:
 				"Short label used in progress and review, e.g. Scope or Priority",
 		}),
 	),
 	question: Type.String({
 		minLength: 1,
-		maxLength: 500,
+		maxLength: 2000,
 		description: "Complete question to ask the user",
 	}),
 	options: Type.Array(OptionSchema, {
@@ -144,20 +146,21 @@ function textResult(
 	return { content: [{ type: "text", text }], details };
 }
 
-/** Summarizes submitted answers into a compact model-friendly sentence fragment. */
+/** Formats submitted answers into a full-fidelity text block for the agent. */
 function summarize(details: ToolDetails): string {
 	return details.answers.length === 0
 		? "No answers were submitted."
 		: details.answers
-				.map((answer) => `"${answer.question}"="${answer.answer}"`)
-				.join(", ");
+				.map(
+					(answer, index) =>
+						`${index + 1}. Question: ${answer.question}\n   Answer: ${answer.answer}`,
+				)
+				.join("\n\n");
 }
 
-/** Formats a persisted answer for compact result rendering. */
+/** Formats a persisted answer for full-fidelity result rendering. */
 function formatAnswer(answer: AnswerDetails): string {
-	return answer.wasCustom
-		? `${answer.header}: ${answer.answer}`
-		: `${answer.header}: ${answer.optionIndex}. ${answer.answer}`;
+	return `${answer.header}\nQuestion: ${answer.question}\nAnswer: ${answer.answer}`;
 }
 
 /**
@@ -294,6 +297,21 @@ async function askQuestionsInTui(
 		function render(width: number) {
 			const lines = [theme.fg("accent", "─".repeat(width))];
 			const add = (text = "") => lines.push(truncateToWidth(text, width));
+			const addWrapped = (prefix = "", text = "") => {
+				if (!text) {
+					add(prefix);
+					return;
+				}
+				const prefixWidth = visibleWidth(prefix);
+				const wrapped = wrapTextWithAnsi(
+					text,
+					Math.max(1, width - prefixWidth),
+				);
+				const indent = " ".repeat(prefixWidth);
+				for (const [index, line] of wrapped.entries()) {
+					add(`${index === 0 ? prefix : indent}${line}`);
+				}
+			};
 
 			if (inReview()) {
 				add(title("Review answers"));
@@ -301,7 +319,10 @@ async function askQuestionsInTui(
 				add();
 				for (const [index, item] of questions.entries()) {
 					add(theme.fg("muted", ` ${item.header}`));
-					add(theme.fg("text", ` ${answers[index]?.answer || "(unanswered)"}`));
+					addWrapped(
+						" ",
+						theme.fg("text", answers[index]?.answer || "(unanswered)"),
+					);
 					add();
 				}
 				add(theme.fg("dim", " Enter submit • h/← back • Esc cancel"));
@@ -315,25 +336,24 @@ async function askQuestionsInTui(
 			}
 
 			add(title(`${screen + 1}/${questions.length} • ${current.header}`));
-			add(theme.fg("text", ` ${current.question}`));
+			addWrapped(" ", theme.fg("text", current.question));
 			add();
 			for (const [index, option] of options().entries()) {
 				const active = index === selection();
 				const picked = option.isCustom
 					? answer()?.wasCustom === true
 					: answer()?.answer === option.label;
-				add(
+				const color = active ? "accent" : picked ? "success" : "text";
+				addWrapped(
 					(active ? theme.fg("accent", "> ") : "  ") +
-						theme.fg(
-							active ? "accent" : picked ? "success" : "text",
-							`${index + 1}. ${option.label}`,
-						),
+						theme.fg(color, `${index + 1}. `),
+					theme.fg(color, option.label),
 				);
 				if (option.description) {
-					add(`   ${theme.fg("muted", option.description)}`);
+					addWrapped("   ", theme.fg("muted", option.description));
 				}
 				if (option.isCustom && !editing && drafts[screen]) {
-					add(`   ${theme.fg("muted", drafts[screen] ?? "")}`);
+					addWrapped("   ", theme.fg("muted", drafts[screen] ?? ""));
 				}
 				if (option.isCustom && editing && active) {
 					for (const line of editor.render(width - 3)) {
@@ -432,7 +452,7 @@ async function askQuestionsInTui(
  * Registers the minimal `ask_questions` Pi extension.
  *
  * The tool is intentionally narrow: single-choice questions, optional custom
- * answers, small input limits, and a compact blocking TUI flow.
+ * answers, bounded input limits, and a compact blocking TUI flow.
  */
 export default function askQuestionsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -468,7 +488,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 			return textResult(
 				details.status === "cancelled"
 					? CANCELLED_TEXT
-					: `User answers: ${summarize(details)}.`,
+					: `User answers:\n${summarize(details)}`,
 				details,
 			);
 		},
@@ -506,7 +526,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 							theme.fg("success", "✓ ") +
 							theme.fg("accent", formatAnswer(answer)),
 					)
-					.join("\n"),
+					.join("\n\n"),
 				0,
 				0,
 			);

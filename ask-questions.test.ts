@@ -3,10 +3,15 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
+import { visibleWidth } from "@mariozechner/pi-tui";
 
 import askQuestionsExtension from "./extensions/ask-questions.ts";
 
 type AskQuestionsTool = Parameters<ExtensionAPI["registerTool"]>[0];
+type RenderableComponent = {
+	handleInput: (data: string) => void;
+	render: (width: number) => string[];
+};
 
 function getTool(): AskQuestionsTool {
 	let tool: unknown;
@@ -35,13 +40,33 @@ function createTheme() {
 	};
 }
 
-test("registers a planning-first ask_questions tool with tight schema limits", () => {
+test("registers a planning-first ask_questions tool with bounded schema limits", () => {
 	const tool = getTool();
-	const questions = (
-		tool.parameters as unknown as {
-			properties: { questions: { minItems?: number; maxItems?: number } };
-		}
-	).properties.questions;
+	const parameters = tool.parameters as unknown as {
+		properties: {
+			questions: {
+				minItems?: number;
+				maxItems?: number;
+				items: {
+					properties: {
+						header: { maxLength?: number };
+						question: { maxLength?: number };
+						options: {
+							items: {
+								properties: {
+									label: { maxLength?: number };
+									description: { maxLength?: number };
+								};
+							};
+						};
+					};
+				};
+			};
+		};
+	};
+	const questions = parameters.properties.questions;
+	const questionProps = questions.items.properties;
+	const optionProps = questionProps.options.items.properties;
 
 	expect(tool.name).toBe("ask_questions");
 	expect(tool.label).toBe("Ask Questions");
@@ -56,6 +81,10 @@ test("registers a planning-first ask_questions tool with tight schema limits", (
 	);
 	expect(questions.minItems).toBe(1);
 	expect(questions.maxItems).toBe(6);
+	expect(questionProps.header.maxLength).toBe(80);
+	expect(questionProps.question.maxLength).toBe(2000);
+	expect(optionProps.label.maxLength).toBe(160);
+	expect(optionProps.description.maxLength).toBe(320);
 });
 
 test("returns a graceful unavailable result when interactive UI is missing", async () => {
@@ -93,14 +122,72 @@ test("returns a graceful unavailable result when interactive UI is missing", asy
 	});
 });
 
-test("uses l like enter before review", async () => {
+test("keeps the cancelled flow unchanged", async () => {
 	const tool = getTool();
+	const result = await tool.execute(
+		"call-cancel",
+		{
+			questions: [
+				{
+					question: "Pick one",
+					options: [{ label: "A" }],
+					allowCustom: false,
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{
+			hasUI: true,
+			ui: {
+				async custom(factory: unknown) {
+					let submitted: unknown;
+					const component = (
+						factory as (
+							tui: { requestRender: () => void },
+							theme: ReturnType<typeof createTheme>,
+							keybindings: unknown,
+							done: (value: unknown) => void,
+						) => RenderableComponent
+					)({ requestRender() {} }, createTheme(), {}, (value) => {
+						submitted = value;
+					});
+
+					component.handleInput("\u001b");
+					return submitted;
+				},
+			},
+		} as ExtensionContext,
+	);
+
+	expect(result.content[0]).toEqual({
+		type: "text",
+		text: "The user dismissed the questions without submitting answers.",
+	});
+	expect(result.details).toEqual({
+		status: "cancelled",
+		questions: [
+			{
+				header: "Q1",
+				question: "Pick one",
+				options: ["A"],
+				allowCustom: false,
+			},
+		],
+		answers: [],
+	});
+});
+
+test("returns full question text in the agent-facing result", async () => {
+	const tool = getTool();
+	const longQuestion =
+		"Pick the safer path when migrating the prompt builder so the full question survives end to end and the agent does not drift on hidden truncation boundaries.";
 	const result = await tool.execute(
 		"call-2",
 		{
 			questions: [
 				{
-					question: "Pick one",
+					question: longQuestion,
 					options: [
 						{ label: "First", description: "First option" },
 						{ label: "Second", description: "Second option" },
@@ -122,7 +209,7 @@ test("uses l like enter before review", async () => {
 							theme: ReturnType<typeof createTheme>,
 							keybindings: unknown,
 							done: (value: unknown) => void,
-						) => { handleInput: (data: string) => void }
+						) => RenderableComponent
 					)({ requestRender() {} }, createTheme(), {}, (value) => {
 						submitted = value;
 					});
@@ -137,14 +224,14 @@ test("uses l like enter before review", async () => {
 
 	expect(result.content[0]).toEqual({
 		type: "text",
-		text: 'User answers: "Pick one"="Second".',
+		text: `User answers:\n1. Question: ${longQuestion}\n   Answer: Second`,
 	});
 	expect(result.details).toEqual({
 		status: "answered",
 		questions: [
 			{
 				header: "Q1",
-				question: "Pick one",
+				question: longQuestion,
 				options: ["First", "Second"],
 				allowCustom: false,
 			},
@@ -153,7 +240,7 @@ test("uses l like enter before review", async () => {
 			{
 				questionIndex: 0,
 				header: "Q1",
-				question: "Pick one",
+				question: longQuestion,
 				answer: "Second",
 				wasCustom: false,
 				optionIndex: 2,
@@ -195,7 +282,7 @@ test("does not use l like enter on the review screen", async () => {
 							theme: ReturnType<typeof createTheme>,
 							keybindings: unknown,
 							done: (value: unknown) => void,
-						) => { handleInput: (data: string) => void }
+						) => RenderableComponent
 					)({ requestRender() {} }, createTheme(), {}, (value) => {
 						submitted = value;
 					});
@@ -212,7 +299,7 @@ test("does not use l like enter on the review screen", async () => {
 
 	expect(result.content[0]).toEqual({
 		type: "text",
-		text: 'User answers: "Pick first"="A", "Pick second"="B".',
+		text: "User answers:\n1. Question: Pick first\n   Answer: A\n\n2. Question: Pick second\n   Answer: B",
 	});
 	const details = result.details as {
 		status: string;
@@ -220,4 +307,52 @@ test("does not use l like enter on the review screen", async () => {
 	};
 	expect(details.status).toBe("answered");
 	expect(details.answers.map((answer) => answer.answer)).toEqual(["A", "B"]);
+});
+
+test("wraps long questions in the TUI instead of truncating them", async () => {
+	const tool = getTool();
+	const longQuestion =
+		"Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda MU_SENTINEL omega";
+	let rendered: string[] = [];
+	await tool.execute(
+		"call-4",
+		{
+			questions: [
+				{
+					question: longQuestion,
+					options: [{ label: "Ship it" }],
+					allowCustom: false,
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{
+			hasUI: true,
+			ui: {
+				async custom(factory: unknown) {
+					let submitted: unknown;
+					const component = (
+						factory as (
+							tui: { requestRender: () => void },
+							theme: ReturnType<typeof createTheme>,
+							keybindings: unknown,
+							done: (value: unknown) => void,
+						) => RenderableComponent
+					)({ requestRender() {} }, createTheme(), {}, (value) => {
+						submitted = value;
+					});
+
+					rendered = component.render(24);
+					component.handleInput("\r");
+					return submitted;
+				},
+			},
+		} as ExtensionContext,
+	);
+
+	const normalized = rendered.join(" ").replace(/\s+/g, " ").trim();
+	expect(normalized).toContain(longQuestion);
+	expect(normalized).toContain("MU_SENTINEL");
+	expect(rendered.every((line) => visibleWidth(line) <= 24)).toBe(true);
 });

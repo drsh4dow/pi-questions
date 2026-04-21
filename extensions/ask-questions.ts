@@ -167,6 +167,7 @@ function formatAnswer(answer: AnswerDetails): string {
  * - `j` / `k` or arrow keys move through options
  * - `h` or left arrow returns to the previous screen
  * - `Enter` confirms the current option or submits the review screen
+ * - `l` confirms the current option, except on the review screen
  * - `Esc` cancels the flow
  */
 async function askQuestionsInTui(
@@ -201,6 +202,8 @@ async function askQuestionsInTui(
 		const isDown = (data: string) => matchesKey(data, Key.down) || data === "j";
 		const isBack = (data: string) => matchesKey(data, Key.left) || data === "h";
 		const isConfirm = (data: string) => matchesKey(data, Key.enter);
+		const isSelect = (data: string) =>
+			matchesKey(data, Key.enter) || data === "l";
 		const inReview = () => !single && screen === questions.length;
 		const question = () => questions[screen];
 		const answer = () => answers[screen];
@@ -344,7 +347,7 @@ async function askQuestionsInTui(
 					"dim",
 					editing
 						? " Type answer • Enter save • Esc back"
-						: ` jk/↑↓ move • 1-9 pick • Enter select${screen > 0 ? " • h/← back" : ""} • Esc cancel`,
+						: ` jk/↑↓ move • 1-9 pick • Enter/l select${screen > 0 ? " • h/← back" : ""} • Esc cancel`,
 				),
 			);
 			lines.push(theme.fg("accent", "─".repeat(width)));
@@ -401,7 +404,7 @@ async function askQuestionsInTui(
 				}
 				return;
 			}
-			if (isConfirm(data)) {
+			if (isSelect(data)) {
 				select();
 				return;
 			}

@@ -93,7 +93,7 @@ test("returns a graceful unavailable result when interactive UI is missing", asy
 	});
 });
 
-test("uses j to move while l does not submit", async () => {
+test("uses l like enter before review", async () => {
 	const tool = getTool();
 	const result = await tool.execute(
 		"call-2",
@@ -129,8 +129,6 @@ test("uses j to move while l does not submit", async () => {
 
 					component.handleInput("j");
 					component.handleInput("l");
-					expect(submitted).toBeUndefined();
-					component.handleInput("\r");
 					return submitted;
 				},
 			},
@@ -162,4 +160,64 @@ test("uses j to move while l does not submit", async () => {
 			},
 		],
 	});
+});
+
+test("does not use l like enter on the review screen", async () => {
+	const tool = getTool();
+	const result = await tool.execute(
+		"call-3",
+		{
+			questions: [
+				{
+					header: "First",
+					question: "Pick first",
+					options: [{ label: "A", description: "First answer" }],
+					allowCustom: false,
+				},
+				{
+					header: "Second",
+					question: "Pick second",
+					options: [{ label: "B", description: "Second answer" }],
+					allowCustom: false,
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{
+			hasUI: true,
+			ui: {
+				async custom(factory: unknown) {
+					let submitted: unknown;
+					const component = (
+						factory as (
+							tui: { requestRender: () => void },
+							theme: ReturnType<typeof createTheme>,
+							keybindings: unknown,
+							done: (value: unknown) => void,
+						) => { handleInput: (data: string) => void }
+					)({ requestRender() {} }, createTheme(), {}, (value) => {
+						submitted = value;
+					});
+
+					component.handleInput("l");
+					component.handleInput("l");
+					expect(submitted).toBeUndefined();
+					component.handleInput("\r");
+					return submitted;
+				},
+			},
+		} as ExtensionContext,
+	);
+
+	expect(result.content[0]).toEqual({
+		type: "text",
+		text: 'User answers: "Pick first"="A", "Pick second"="B".',
+	});
+	const details = result.details as {
+		status: string;
+		answers: Array<{ answer: string }>;
+	};
+	expect(details.status).toBe("answered");
+	expect(details.answers.map((answer) => answer.answer)).toEqual(["A", "B"]);
 });

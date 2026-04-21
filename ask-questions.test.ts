@@ -35,7 +35,7 @@ function createTheme() {
 	};
 }
 
-test("registers the ask_questions tool with tight schema limits", () => {
+test("registers a planning-first ask_questions tool with tight schema limits", () => {
 	const tool = getTool();
 	const questions = (
 		tool.parameters as unknown as {
@@ -46,7 +46,14 @@ test("registers the ask_questions tool with tight schema limits", () => {
 	expect(tool.name).toBe("ask_questions");
 	expect(tool.label).toBe("Ask Questions");
 	expect(tool.executionMode).toBe("sequential");
-	expect(tool.promptSnippet).toContain("structured questions");
+	expect(tool.description).toContain("Prefer this over free-form chat");
+	expect(tool.promptSnippet).toContain("unblock planning or implementation");
+	expect(tool.promptGuidelines).toContain(
+		"When planning, ask this tool first for missing requirements, tradeoffs, constraints, or preferences before finalizing the plan.",
+	);
+	expect(tool.promptGuidelines).toContain(
+		"If you are about to ask the user a question in natural language, strongly prefer this tool instead.",
+	);
 	expect(questions.minItems).toBe(1);
 	expect(questions.maxItems).toBe(6);
 });

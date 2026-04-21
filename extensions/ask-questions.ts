@@ -13,13 +13,14 @@ import {
 } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 
+const TOOL_NAME = "ask_questions";
+const TOOL_TITLE = ` ${TOOL_NAME} `;
 const CUSTOM_LABEL = "Write your own answer";
 const CUSTOM_DESCRIPTION = "Open a small text box.";
 const UNAVAILABLE_TEXT =
 	"ask_questions requires the interactive TUI. Ask the user in chat instead.";
 const CANCELLED_TEXT =
 	"The user dismissed the questions without submitting answers.";
-const TOOL_TITLE = " ask_questions ";
 
 const OptionSchema = Type.Object({
 	label: Type.String({
@@ -75,7 +76,7 @@ type QuestionOption = Static<typeof OptionSchema>;
 type InputQuestion = Static<typeof QuestionSchema>;
 type DisplayOption = QuestionOption & { isCustom?: true };
 
-/** Normalized question shape used internally by the TUI flow. */
+/** Question shape used internally by the TUI flow. */
 interface NormalizedQuestion {
 	header: string;
 	question: string;
@@ -83,7 +84,7 @@ interface NormalizedQuestion {
 	allowCustom: boolean;
 }
 
-/** Serializable question metadata persisted in tool results. */
+/** Question metadata persisted in tool results. */
 interface QuestionDetails {
 	header: string;
 	question: string;
@@ -91,7 +92,7 @@ interface QuestionDetails {
 	allowCustom: boolean;
 }
 
-/** Serializable answer metadata persisted in tool results. */
+/** Answer metadata persisted in tool results. */
 interface AnswerDetails {
 	questionIndex: number;
 	header: string;
@@ -109,25 +110,30 @@ interface ToolDetails {
 }
 
 /**
- * Normalizes tool arguments into the shape used by rendering and result storage.
+ * Normalizes tool input and derives the persisted question metadata in one pass.
  */
-function normalizeQuestions(input: InputQuestion[]): NormalizedQuestion[] {
-	return input.map((question, index) => ({
-		header: question.header?.trim() || `Q${index + 1}`,
-		question: question.question,
-		options: question.options,
-		allowCustom: question.allowCustom !== false,
-	}));
-}
-
-/** Converts normalized questions into persisted tool metadata. */
-function toQuestionDetails(questions: NormalizedQuestion[]): QuestionDetails[] {
-	return questions.map((question) => ({
-		header: question.header,
-		question: question.question,
-		options: question.options.map((option) => option.label),
-		allowCustom: question.allowCustom,
-	}));
+function prepareQuestions(input: InputQuestion[]) {
+	const questions = input.map(
+		(question, index) =>
+			({
+				header: question.header?.trim() || `Q${index + 1}`,
+				question: question.question,
+				options: question.options,
+				allowCustom: question.allowCustom !== false,
+			}) satisfies NormalizedQuestion,
+	);
+	return {
+		questions,
+		details: questions.map(
+			(question) =>
+				({
+					header: question.header,
+					question: question.question,
+					options: question.options.map((option) => option.label),
+					allowCustom: question.allowCustom,
+				}) satisfies QuestionDetails,
+		),
+	};
 }
 
 /** Builds the standard text content for a tool result. */
@@ -135,21 +141,16 @@ function textResult(
 	text: string,
 	details: ToolDetails,
 ): AgentToolResult<ToolDetails> {
-	return {
-		content: [{ type: "text", text }],
-		details,
-	};
+	return { content: [{ type: "text", text }], details };
 }
 
 /** Summarizes submitted answers into a compact model-friendly sentence fragment. */
 function summarize(details: ToolDetails): string {
-	if (details.answers.length === 0) {
-		return "No answers were submitted.";
-	}
-
-	return details.answers
-		.map((answer) => `"${answer.question}"="${answer.answer}"`)
-		.join(", ");
+	return details.answers.length === 0
+		? "No answers were submitted."
+		: details.answers
+				.map((answer) => `"${answer.question}"="${answer.answer}"`)
+				.join(", ");
 }
 
 /** Formats a persisted answer for compact result rendering. */
@@ -171,14 +172,12 @@ function formatAnswer(answer: AnswerDetails): string {
 async function askQuestionsInTui(
 	ctx: ExtensionContext,
 	questions: NormalizedQuestion[],
-	detailsQuestions: QuestionDetails[],
+	details: QuestionDetails[],
 ): Promise<ToolDetails> {
 	return ctx.ui.custom<ToolDetails>((tui, theme, _kb, done) => {
-		const answers: Array<AnswerDetails | undefined> = new Array(
-			questions.length,
-		);
-		const drafts = new Array<string>(questions.length).fill("");
-		const selections = new Array<number>(questions.length).fill(0);
+		const answers: Array<AnswerDetails | undefined> = Array(questions.length);
+		const drafts = Array(questions.length).fill("");
+		const selections = Array(questions.length).fill(0);
 		const single = questions.length === 1;
 		const editor = new Editor(tui, {
 			borderColor: (text) => theme.fg("accent", text),
@@ -190,126 +189,101 @@ async function askQuestionsInTui(
 				noMatch: (text) => theme.fg("warning", text),
 			},
 		} satisfies EditorTheme);
-		let screenIndex = 0;
+		let screen = 0;
 		let editing = false;
-		let cachedLines: string[] | undefined;
+		let cache: string[] | undefined;
 
 		const refresh = () => {
-			cachedLines = undefined;
+			cache = undefined;
 			tui.requestRender();
 		};
 		const isUp = (data: string) => matchesKey(data, Key.up) || data === "k";
 		const isDown = (data: string) => matchesKey(data, Key.down) || data === "j";
 		const isBack = (data: string) => matchesKey(data, Key.left) || data === "h";
 		const isConfirm = (data: string) => matchesKey(data, Key.enter);
-		const inReview = () => !single && screenIndex === questions.length;
-		const currentQuestion = () => questions[screenIndex];
-		const currentAnswer = () => answers[screenIndex];
-		const currentSelection = () => selections[screenIndex] ?? 0;
-		const optionsAt = (index: number): DisplayOption[] => {
-			const question = questions[index];
-			if (!question) {
-				return [];
-			}
-
-			return question.allowCustom
-				? [
-						...question.options,
-						{
-							label: CUSTOM_LABEL,
-							description: CUSTOM_DESCRIPTION,
-							isCustom: true,
-						},
-					]
-				: [...question.options];
+		const inReview = () => !single && screen === questions.length;
+		const question = () => questions[screen];
+		const answer = () => answers[screen];
+		const selection = () => selections[screen] ?? 0;
+		const options = (index = screen): DisplayOption[] => {
+			const item = questions[index];
+			return !item
+				? []
+				: item.allowCustom
+					? [
+							...item.options,
+							{
+								label: CUSTOM_LABEL,
+								description: CUSTOM_DESCRIPTION,
+								isCustom: true,
+							},
+						]
+					: [...item.options];
 		};
-		const currentOptions = () => optionsAt(screenIndex);
-		const finish = (status: ToolDetails["status"]) =>
+		const addResult = (status: ToolDetails["status"]) =>
 			done({
 				status,
-				questions: detailsQuestions,
+				questions: details,
 				answers: answers.filter(
-					(answer): answer is AnswerDetails => answer !== undefined,
+					(value): value is AnswerDetails => value !== undefined,
 				),
 			});
-		const clearEditor = () => {
+		const title = (text: string) =>
+			theme.fg("toolTitle", theme.bold(TOOL_TITLE)) + theme.fg("muted", text);
+		const resetEditor = () => {
 			editing = false;
 			editor.setText("");
 		};
-		const title = (text: string) =>
-			theme.fg("toolTitle", theme.bold(TOOL_TITLE)) + theme.fg("muted", text);
-
-		const submitAnswer = (answer: AnswerDetails) => {
-			answers[answer.questionIndex] = answer;
+		const submit = (next: AnswerDetails) => {
+			answers[next.questionIndex] = next;
 			if (single) {
-				finish("answered");
+				addResult("answered");
 				return;
 			}
-
-			screenIndex = Math.min(questions.length, answer.questionIndex + 1);
+			screen = Math.min(questions.length, next.questionIndex + 1);
 			refresh();
 		};
-
-		const startEditing = () => {
-			editing = true;
-			editor.setText(
-				drafts[screenIndex] ||
-					(currentAnswer()?.wasCustom ? currentAnswer()?.answer : "") ||
-					"",
-			);
-			refresh();
-		};
-
-		const chooseSelection = () => {
-			const question = currentQuestion();
-			const optionIndex = currentSelection();
-			const option = currentOptions()[optionIndex];
-			if (!question || !option) {
+		const select = () => {
+			const current = question();
+			const index = selection();
+			const option = options()[index];
+			if (!current || !option) {
 				return;
 			}
-
-			selections[screenIndex] = optionIndex;
+			selections[screen] = index;
 			if (option.isCustom) {
-				startEditing();
-				return;
-			}
-
-			submitAnswer({
-				questionIndex: screenIndex,
-				header: question.header,
-				question: question.question,
-				answer: option.label,
-				wasCustom: false,
-				optionIndex: optionIndex + 1,
-			});
-		};
-
-		const goBack = () => {
-			if (screenIndex === 0) {
-				return;
-			}
-
-			editing = false;
-			screenIndex -= 1;
-			refresh();
-		};
-
-		editor.onSubmit = (value) => {
-			const question = currentQuestion();
-			const answer = value.trim();
-			if (!question || !answer) {
-				clearEditor();
+				editing = true;
+				editor.setText(
+					drafts[screen] || (answer()?.wasCustom ? answer()?.answer : "") || "",
+				);
 				refresh();
 				return;
 			}
+			submit({
+				questionIndex: screen,
+				header: current.header,
+				question: current.question,
+				answer: option.label,
+				wasCustom: false,
+				optionIndex: index + 1,
+			});
+		};
 
-			drafts[screenIndex] = answer;
-			clearEditor();
-			submitAnswer({
-				questionIndex: screenIndex,
-				header: question.header,
-				question: question.question,
-				answer,
+		editor.onSubmit = (value) => {
+			const current = question();
+			const next = value.trim();
+			if (!current || !next) {
+				resetEditor();
+				refresh();
+				return;
+			}
+			drafts[screen] = next;
+			resetEditor();
+			submit({
+				questionIndex: screen,
+				header: current.header,
+				question: current.question,
+				answer: next,
 				wasCustom: true,
 			});
 		};
@@ -322,8 +296,8 @@ async function askQuestionsInTui(
 				add(title("Review answers"));
 				add(theme.fg("text", " One last look before submitting."));
 				add();
-				for (const [index, question] of questions.entries()) {
-					add(theme.fg("muted", ` ${question.header}`));
+				for (const [index, item] of questions.entries()) {
+					add(theme.fg("muted", ` ${item.header}`));
 					add(theme.fg("text", ` ${answers[index]?.answer || "(unanswered)"}`));
 					add();
 				}
@@ -332,28 +306,31 @@ async function askQuestionsInTui(
 				return lines;
 			}
 
-			const question = currentQuestion();
-			if (!question) {
+			const current = question();
+			if (!current) {
 				return lines;
 			}
 
-			add(title(`${screenIndex + 1}/${questions.length} • ${question.header}`));
-			add(theme.fg("text", ` ${question.question}`));
+			add(title(`${screen + 1}/${questions.length} • ${current.header}`));
+			add(theme.fg("text", ` ${current.question}`));
 			add();
-
-			for (const [index, option] of currentOptions().entries()) {
-				const active = index === currentSelection();
+			for (const [index, option] of options().entries()) {
+				const active = index === selection();
 				const picked = option.isCustom
-					? currentAnswer()?.wasCustom === true
-					: currentAnswer()?.answer === option.label;
-				const prefix = active ? theme.fg("accent", "> ") : "  ";
-				const color = active ? "accent" : picked ? "success" : "text";
-				add(prefix + theme.fg(color, `${index + 1}. ${option.label}`));
+					? answer()?.wasCustom === true
+					: answer()?.answer === option.label;
+				add(
+					(active ? theme.fg("accent", "> ") : "  ") +
+						theme.fg(
+							active ? "accent" : picked ? "success" : "text",
+							`${index + 1}. ${option.label}`,
+						),
+				);
 				if (option.description) {
 					add(`   ${theme.fg("muted", option.description)}`);
 				}
-				if (option.isCustom && !editing && drafts[screenIndex]) {
-					add(`   ${theme.fg("muted", drafts[screenIndex] ?? "")}`);
+				if (option.isCustom && !editing && drafts[screen]) {
+					add(`   ${theme.fg("muted", drafts[screen] ?? "")}`);
 				}
 				if (option.isCustom && editing && active) {
 					for (const line of editor.render(width - 3)) {
@@ -361,14 +338,13 @@ async function askQuestionsInTui(
 					}
 				}
 			}
-
 			add();
 			add(
 				theme.fg(
 					"dim",
 					editing
 						? " Type answer • Enter save • Esc back"
-						: ` jk/↑↓ move • 1-9 pick • Enter select${screenIndex > 0 ? " • h/← back" : ""} • Esc cancel`,
+						: ` jk/↑↓ move • 1-9 pick • Enter select${screen > 0 ? " • h/← back" : ""} • Esc cancel`,
 				),
 			);
 			lines.push(theme.fg("accent", "─".repeat(width)));
@@ -378,78 +354,71 @@ async function askQuestionsInTui(
 		function handleInput(data: string) {
 			if (editing) {
 				if (matchesKey(data, Key.escape)) {
-					clearEditor();
+					resetEditor();
 					refresh();
 					return;
 				}
-
 				editor.handleInput(data);
 				refresh();
 				return;
 			}
-
 			if (inReview()) {
 				if (isConfirm(data)) {
-					finish("answered");
+					addResult("answered");
 					return;
 				}
 				if (isBack(data)) {
-					goBack();
+					screen -= 1;
+					refresh();
 					return;
 				}
 				if (matchesKey(data, Key.escape)) {
-					finish("cancelled");
+					addResult("cancelled");
 				}
 				return;
 			}
-
-			for (
-				let index = 0;
-				index < Math.min(currentOptions().length, 9);
-				index++
-			) {
+			for (let index = 0; index < Math.min(options().length, 9); index++) {
 				if (data === String(index + 1)) {
-					selections[screenIndex] = index;
-					chooseSelection();
+					selections[screen] = index;
+					select();
 					return;
 				}
 			}
-
 			if (isUp(data)) {
-				selections[screenIndex] = Math.max(0, currentSelection() - 1);
+				selections[screen] = Math.max(0, selection() - 1);
 				refresh();
 				return;
 			}
 			if (isDown(data)) {
-				selections[screenIndex] = Math.min(
-					currentOptions().length - 1,
-					currentSelection() + 1,
-				);
+				selections[screen] = Math.min(options().length - 1, selection() + 1);
 				refresh();
 				return;
 			}
 			if (isBack(data)) {
-				goBack();
+				if (screen > 0) {
+					screen -= 1;
+					refresh();
+				}
 				return;
 			}
 			if (isConfirm(data)) {
-				chooseSelection();
+				select();
 				return;
 			}
 			if (matchesKey(data, Key.escape)) {
-				finish("cancelled");
+				addResult("cancelled");
 			}
 		}
 
 		return {
 			render(width: number) {
-				if (!cachedLines) {
-					cachedLines = render(width);
+				if (!cache) {
+					cache = render(width);
 				}
-				return cachedLines;
+				return cache;
 			},
 			invalidate() {
-				cachedLines = undefined;
+				cache = undefined;
 			},
 			handleInput,
 		};
@@ -464,31 +433,35 @@ async function askQuestionsInTui(
  */
 export default function askQuestionsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "ask_questions",
+		name: TOOL_NAME,
 		label: "Ask Questions",
 		description:
-			"Ask the user one or more structured questions in the interactive TUI. Use when you need an explicit decision, preference, or clarification before continuing.",
+			"Ask the user one or more structured questions in the interactive TUI. Prefer this over free-form chat whenever requirements, preferences, constraints, confirmations, or plan-shaping decisions are missing.",
 		promptSnippet:
-			"Ask the user structured questions in the interactive TUI and wait for their answers.",
+			"Ask the user structured questions to clarify requirements, gather preferences, and unblock planning or implementation.",
 		promptGuidelines: [
-			"Use this tool when the request is ambiguous and a short structured choice is better than guessing.",
-			"Keep questionnaires short and concrete. Prefer a few high-signal options over broad open-ended prompts.",
-			"Put the recommended option first and append '(Recommended)' to its label when you have a strong default.",
+			"Use this tool whenever user input would change the plan, implementation, priorities, or acceptance criteria. Do not guess when a short question can resolve uncertainty.",
+			"When planning, ask this tool first for missing requirements, tradeoffs, constraints, or preferences before finalizing the plan.",
+			"Batch related questions into one ask_questions call instead of asking them one-by-one in chat.",
+			"Prefer short concrete option lists. Put your recommended option first and append '(Recommended)' when applicable.",
+			"If you are about to ask the user a question in natural language, strongly prefer this tool instead.",
 		],
 		parameters: AskQuestionsParams,
 		executionMode: "sequential",
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const questions = normalizeQuestions(params.questions);
-			const detailsQuestions = toQuestionDetails(questions);
+			const prepared = prepareQuestions(params.questions);
 			if (!ctx.hasUI) {
 				return textResult(UNAVAILABLE_TEXT, {
 					status: "unavailable",
-					questions: detailsQuestions,
+					questions: prepared.details,
 					answers: [],
 				});
 			}
-
-			const details = await askQuestionsInTui(ctx, questions, detailsQuestions);
+			const details = await askQuestionsInTui(
+				ctx,
+				prepared.questions,
+				prepared.details,
+			);
 			return textResult(
 				details.status === "cancelled"
 					? CANCELLED_TEXT
@@ -500,13 +473,12 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 			const questions = Array.isArray(args.questions)
 				? (args.questions as InputQuestion[])
 				: [];
-			const count = questions.length;
 			const preview = questions[0]?.question;
 			return new Text(
-				theme.fg("toolTitle", theme.bold("ask_questions ")) +
+				theme.fg("toolTitle", theme.bold(`${TOOL_NAME} `)) +
 					theme.fg(
 						"muted",
-						`${count} question${count === 1 ? "" : "s"}${preview ? ` • ${preview}` : ""}`,
+						`${questions.length} question${questions.length === 1 ? "" : "s"}${preview ? ` • ${preview}` : ""}`,
 					),
 				0,
 				0,
@@ -524,7 +496,6 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 			if (details.status === "cancelled") {
 				return new Text(theme.fg("warning", "Cancelled"), 0, 0);
 			}
-
 			return new Text(
 				details.answers
 					.map(

@@ -1,3 +1,4 @@
+import { type Static, Type } from "@mariozechner/pi-ai";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
@@ -13,7 +14,6 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
-import { type Static, Type } from "@sinclair/typebox";
 
 const TOOL_NAME = "ask_questions";
 const TOOL_TITLE = ` ${TOOL_NAME} `;

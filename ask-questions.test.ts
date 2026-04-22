@@ -40,7 +40,7 @@ function createTheme() {
 	};
 }
 
-test("registers a small broadly positioned ask_questions tool without pinning exact prompt copy", () => {
+test("registers a small broadly positioned ask_questions tool without exposing custom-answer config", () => {
 	const tool = getTool();
 	const parameters = tool.parameters as unknown as {
 		properties: {
@@ -48,9 +48,10 @@ test("registers a small broadly positioned ask_questions tool without pinning ex
 				minItems?: number;
 				maxItems?: number;
 				items: {
-					properties: {
+					properties: Record<string, unknown> & {
 						header: { maxLength?: number };
 						question: { maxLength?: number };
+						allowCustom?: unknown;
 						options: {
 							items: {
 								properties: {
@@ -90,6 +91,7 @@ test("registers a small broadly positioned ask_questions tool without pinning ex
 	expect(questionProps.question.maxLength).toBe(500);
 	expect(optionProps.label.maxLength).toBe(120);
 	expect(optionProps.description.maxLength).toBe(240);
+	expect(questionProps.allowCustom).toBeUndefined();
 });
 
 test("returns a graceful unavailable result when interactive UI is missing", async () => {
@@ -120,7 +122,6 @@ test("returns a graceful unavailable result when interactive UI is missing", asy
 				header: "Q1",
 				question: "Which stack should we use?",
 				options: ["Bun"],
-				allowCustom: true,
 			},
 		],
 		answers: [],
@@ -136,7 +137,6 @@ test("keeps the cancelled flow unchanged", async () => {
 				{
 					question: "Pick one",
 					options: [{ label: "A" }],
-					allowCustom: false,
 				},
 			],
 		},
@@ -176,7 +176,6 @@ test("keeps the cancelled flow unchanged", async () => {
 				header: "Q1",
 				question: "Pick one",
 				options: ["A"],
-				allowCustom: false,
 			},
 		],
 		answers: [],
@@ -197,7 +196,6 @@ test("returns full question text in the agent-facing result", async () => {
 						{ label: "First", description: "First option" },
 						{ label: "Second", description: "Second option" },
 					],
-					allowCustom: false,
 				},
 			],
 		},
@@ -238,7 +236,6 @@ test("returns full question text in the agent-facing result", async () => {
 				header: "Q1",
 				question: longQuestion,
 				options: ["First", "Second"],
-				allowCustom: false,
 			},
 		],
 		answers: [
@@ -254,6 +251,73 @@ test("returns full question text in the agent-facing result", async () => {
 	});
 });
 
+test("always offers a typed answer path", async () => {
+	const tool = getTool();
+	const result = await tool.execute(
+		"call-custom",
+		{
+			questions: [
+				{
+					question: "Which runtime should we use?",
+					options: [{ label: "Bun", description: "Default pick" }],
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{
+			hasUI: true,
+			ui: {
+				async custom(factory: unknown) {
+					let submitted: unknown;
+					const component = (
+						factory as (
+							tui: { requestRender: () => void },
+							theme: ReturnType<typeof createTheme>,
+							keybindings: unknown,
+							done: (value: unknown) => void,
+						) => RenderableComponent
+					)({ requestRender() {} }, createTheme(), {}, (value) => {
+						submitted = value;
+					});
+
+					component.handleInput("j");
+					component.handleInput("l");
+					for (const char of "Custom stack") {
+						component.handleInput(char);
+					}
+					component.handleInput("\r");
+					return submitted;
+				},
+			},
+		} as ExtensionContext,
+	);
+
+	expect(result.content[0]).toEqual({
+		type: "text",
+		text: "User answers:\n1. Question: Which runtime should we use?\n   Answer: Custom stack",
+	});
+	expect(result.details).toEqual({
+		status: "answered",
+		questions: [
+			{
+				header: "Q1",
+				question: "Which runtime should we use?",
+				options: ["Bun"],
+			},
+		],
+		answers: [
+			{
+				questionIndex: 0,
+				header: "Q1",
+				question: "Which runtime should we use?",
+				answer: "Custom stack",
+				wasCustom: true,
+			},
+		],
+	});
+});
+
 test("does not use l like enter on the review screen", async () => {
 	const tool = getTool();
 	const result = await tool.execute(
@@ -264,13 +328,11 @@ test("does not use l like enter on the review screen", async () => {
 					header: "First",
 					question: "Pick first",
 					options: [{ label: "A", description: "First answer" }],
-					allowCustom: false,
 				},
 				{
 					header: "Second",
 					question: "Pick second",
 					options: [{ label: "B", description: "Second answer" }],
-					allowCustom: false,
 				},
 			],
 		},
@@ -326,7 +388,6 @@ test("wraps long questions in the TUI instead of truncating them", async () => {
 				{
 					question: longQuestion,
 					options: [{ label: "Ship it" }],
-					allowCustom: false,
 				},
 			],
 		},

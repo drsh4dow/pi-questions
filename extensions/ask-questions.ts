@@ -57,12 +57,6 @@ const QuestionSchema = Type.Object({
 		maxItems: 8,
 		description: "Short concrete choices.",
 	}),
-	allowCustom: Type.Optional(
-		Type.Boolean({
-			description:
-				"Allow a final 'Type your own answer' option. Defaults to true.",
-		}),
-	),
 });
 
 const AskQuestionsParams = Type.Object({
@@ -82,7 +76,6 @@ interface NormalizedQuestion {
 	header: string;
 	question: string;
 	options: QuestionOption[];
-	allowCustom: boolean;
 }
 
 /** Question metadata persisted in tool results. */
@@ -90,7 +83,6 @@ interface QuestionDetails {
 	header: string;
 	question: string;
 	options: string[];
-	allowCustom: boolean;
 }
 
 /** Answer metadata persisted in tool results. */
@@ -120,7 +112,6 @@ function prepareQuestions(input: InputQuestion[]) {
 				header: question.header?.trim() || `Q${index + 1}`,
 				question: question.question,
 				options: question.options,
-				allowCustom: question.allowCustom !== false,
 			}) satisfies NormalizedQuestion,
 	);
 	return {
@@ -131,7 +122,6 @@ function prepareQuestions(input: InputQuestion[]) {
 					header: question.header,
 					question: question.question,
 					options: question.options.map((option) => option.label),
-					allowCustom: question.allowCustom,
 				}) satisfies QuestionDetails,
 		),
 	};
@@ -214,16 +204,14 @@ async function askQuestionsInTui(
 			const item = questions[index];
 			return !item
 				? []
-				: item.allowCustom
-					? [
-							...item.options,
-							{
-								label: CUSTOM_LABEL,
-								description: CUSTOM_DESCRIPTION,
-								isCustom: true,
-							},
-						]
-					: [...item.options];
+				: [
+						...item.options,
+						{
+							label: CUSTOM_LABEL,
+							description: CUSTOM_DESCRIPTION,
+							isCustom: true,
+						},
+					];
 		};
 		const addResult = (status: ToolDetails["status"]) =>
 			done({

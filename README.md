@@ -26,7 +26,7 @@ This package gives Pi one compact way to ask users structured questions in a TUI
 ## What it does
 
 - asks one or more structured questions in Pi's interactive TUI
-- supports single-choice options plus an optional custom answer
+- supports single-choice options plus an always-available custom answer
 - uses a final review step for multi-question runs
 - returns graceful non-error results for cancel and non-interactive sessions
 
@@ -37,7 +37,8 @@ This package gives Pi one compact way to ask users structured questions in a TUI
 - `question`: full prompt shown to the user
 - `header?`: short review/progress label
 - `options`: short concrete choices
-- `allowCustom?`: whether to add `Write your own answer`
+
+A `Write your own answer` path is always present in the TUI.
 
 Example:
 

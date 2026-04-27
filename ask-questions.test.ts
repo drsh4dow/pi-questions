@@ -79,6 +79,9 @@ test("registers a small broadly positioned ask_questions tool without exposing c
 	expect(tool.description).toContain("direct user questions");
 	expect(tool.promptSnippet).toContain("missing user input");
 	expect(promptGuidelines).toHaveLength(2);
+	expect(
+		promptGuidelines.every((guideline) => guideline.includes("ask_questions")),
+	).toBe(true);
 	expect(promptGuidelineText).toContain("trivial");
 	expect(promptGuidelineText).toContain("rhetorical");
 	expect(promptGuidelineText).toContain("lightweight next-step question");
@@ -92,6 +95,22 @@ test("registers a small broadly positioned ask_questions tool without exposing c
 	expect(optionProps.label.maxLength).toBe(120);
 	expect(optionProps.description.maxLength).toBe(240);
 	expect(questionProps.allowCustom).toBeUndefined();
+});
+
+test("package metadata follows Pi package distribution conventions", async () => {
+	const pkg = (await Bun.file("package.json").json()) as {
+		files?: string[];
+		pi?: { extensions?: string[] };
+		peerDependencies?: Record<string, string>;
+	};
+
+	expect(pkg.pi?.extensions).toEqual(["./extensions/ask-questions.ts"]);
+	expect(pkg.files).toEqual(["extensions", "src", "README.md"]);
+	expect(pkg.peerDependencies).toEqual({
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*",
+		"@mariozechner/pi-tui": "*",
+	});
 });
 
 test("returns a graceful unavailable result when interactive UI is missing", async () => {
@@ -374,6 +393,56 @@ test("does not use l like enter on the review screen", async () => {
 	};
 	expect(details.status).toBe("answered");
 	expect(details.answers.map((answer) => answer.answer)).toEqual(["A", "B"]);
+});
+
+test("rerenders cached TUI lines when the available width changes", async () => {
+	const tool = getTool();
+	const question = "A question that fits when the terminal is wide";
+	let narrow: string[] = [];
+	let wide: string[] = [];
+
+	await tool.execute(
+		"call-width-cache",
+		{
+			questions: [
+				{
+					question,
+					options: [{ label: "Ship it" }],
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{
+			hasUI: true,
+			ui: {
+				async custom(factory: unknown) {
+					let submitted: unknown;
+					const component = (
+						factory as (
+							tui: { requestRender: () => void },
+							theme: ReturnType<typeof createTheme>,
+							keybindings: unknown,
+							done: (value: unknown) => void,
+						) => RenderableComponent
+					)({ requestRender() {} }, createTheme(), {}, (value) => {
+						submitted = value;
+					});
+
+					narrow = component.render(24);
+					wide = component.render(80);
+					component.handleInput("\r");
+					return submitted;
+				},
+			},
+		} as ExtensionContext,
+	);
+
+	const normalizedNarrow = narrow.join(" ").replace(/\s+/g, " ").trim();
+
+	expect(normalizedNarrow).toContain(question);
+	expect(narrow.some((line) => line.includes(question))).toBe(false);
+	expect(wide.some((line) => line.includes(question))).toBe(true);
 });
 
 test("wraps long questions in the TUI instead of truncating them", async () => {

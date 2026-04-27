@@ -184,7 +184,7 @@ async function askQuestionsInTui(
 		} satisfies EditorTheme);
 		let screen = 0;
 		let editing = false;
-		let cache: string[] | undefined;
+		let cache: { width: number; lines: string[] } | undefined;
 
 		const refresh = () => {
 			cache = undefined;
@@ -422,10 +422,10 @@ async function askQuestionsInTui(
 
 		return {
 			render(width: number) {
-				if (!cache) {
-					cache = render(width);
+				if (!cache || cache.width !== width) {
+					cache = { width, lines: render(width) };
 				}
-				return cache;
+				return cache.lines;
 			},
 			invalidate() {
 				cache = undefined;
@@ -449,8 +449,8 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 			"Ask the user structured questions in the interactive TUI. Default to this for direct user questions when structured input helps.",
 		promptSnippet: "Ask structured questions for missing user input.",
 		promptGuidelines: [
-			"Use this for direct user questions unless the question is trivial, rhetorical, or only a lightweight next-step question at the end of a normal answer.",
-			"Batch related questions. Keep options short and concrete, and put the recommended option first when helpful.",
+			"Use ask_questions for direct user questions unless the question is trivial, rhetorical, or only a lightweight next-step question at the end of a normal answer.",
+			"Use ask_questions to batch related questions. Keep options short and concrete, and put the recommended option first when helpful.",
 		],
 		parameters: AskQuestionsParams,
 		executionMode: "sequential",

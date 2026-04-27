@@ -1,8 +1,11 @@
 # pi-questions
 
 [![npm version](https://img.shields.io/npm/v/pi-questions.svg)](https://www.npmjs.com/package/pi-questions)
+[![CI](https://github.com/drsh4dow/pi-questions/actions/workflows/ci.yml/badge.svg)](https://github.com/drsh4dow/pi-questions/actions/workflows/ci.yml)
 
-Minimal Pi package that adds a structured `ask_questions` tool.
+One Pi tool for asking the user.
+
+Sometimes Pi needs input from the user. The user — yes, you — does not want to type it into chat. This is the tool for that.
 
 ## Install
 
@@ -10,49 +13,27 @@ Minimal Pi package that adds a structured `ask_questions` tool.
 pi install npm:pi-questions
 ```
 
-## Philosophy
-
-Small, obvious, boring.
-
-This package gives Pi one compact way to ask users structured questions in a TUI. The stable contract is the bounded schema and interaction flow. Prompt copy stays intentionally small and tunable.
-
-## Non-goals
-
-- survey engine
-- workflow builder
-- forms platform
-- feature growth that adds more surface area than it removes
-
 ## What it does
 
-- asks one or more structured questions in Pi's interactive TUI
-- supports single-choice options plus an always-available custom answer
-- uses a final review step for multi-question runs
-- returns graceful non-error results for cancel and non-interactive sessions
+`pi-questions` adds `ask_questions`.
 
-## Tool shape
+The tool opens a small TUI flow, asks one or more questions, and returns the answers as structured data.
 
-`ask_questions` accepts a small ordered list of questions. Each question has:
+Each question can have short options. A custom answer is always available.
 
-- `question`: full prompt shown to the user
-- `header?`: short review/progress label
-- `options`: short concrete choices
+## Behavior
 
-A `Write your own answer` path is always present in the TUI.
+- asks questions in the interactive TUI
+- supports selectable options
+- always includes `Write your own answer`
+- supports a review step for multiple questions
+- returns normal results for cancel and non-interactive sessions
 
-Example:
+## Controls
 
-```ts
-{
-  questions: [
-    {
-      header: "Stack",
-      question: "Which stack should we use?",
-      options: [
-        { label: "Bun + TypeScript (Recommended)", description: "Smallest path" },
-        { label: "Node + TypeScript", description: "Use the more common runtime" }
-      ]
-    }
-  ]
-}
-```
+- `j/k` or arrows: move
+- `1-9`: pick option
+- `Enter`: select or submit
+- `h/←`: back
+- `l`: select
+- `Esc`: cancel

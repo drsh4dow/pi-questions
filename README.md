@@ -5,7 +5,7 @@
 
 One Pi tool for asking the user.
 
-Sometimes Pi needs input from the user. The user — yes, you — does not want to type it into chat. This is the tool for that.
+Sometimes Pi needs input from the user. The user - yes, you - does not want to type it into chat. This is the tool for that.
 
 ## Install
 

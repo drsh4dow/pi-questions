@@ -5,7 +5,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { visibleWidth } from "@mariozechner/pi-tui";
 
-import askQuestionsExtension from "./extensions/ask-questions.ts";
+import askQuestionsExtension from "../extensions/ask-questions.ts";
 
 type AskQuestionsTool = Parameters<ExtensionAPI["registerTool"]>[0];
 type RenderableComponent = {
@@ -105,7 +105,7 @@ test("package metadata follows Pi package distribution conventions", async () =>
 	};
 
 	expect(pkg.pi?.extensions).toEqual(["./extensions/ask-questions.ts"]);
-	expect(pkg.files).toEqual(["extensions", "src", "README.md"]);
+	expect(pkg.files).toEqual(["extensions", "README.md"]);
 	expect(pkg.peerDependencies).toEqual({
 		"@mariozechner/pi-ai": "*",
 		"@mariozechner/pi-coding-agent": "*",

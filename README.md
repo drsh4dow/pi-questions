@@ -28,6 +28,7 @@ Each question can have short options. A custom answer is always available.
 - always includes `Write your own answer`
 - supports a review step for multiple questions
 - returns normal results for cancel and non-interactive sessions
+- does not start child agents or call model/provider APIs; telemetry only sees the surrounding assistant turns
 
 ## Controls
 

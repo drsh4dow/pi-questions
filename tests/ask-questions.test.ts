@@ -97,6 +97,20 @@ test("registers a small broadly positioned ask_questions tool without exposing c
 	expect(questionProps.allowCustom).toBeUndefined();
 });
 
+test("registers no lifecycle hooks or background work", () => {
+	const calls: string[] = [];
+	askQuestionsExtension({
+		on(event: string) {
+			calls.push(`on:${event}`);
+		},
+		registerTool(definition: AskQuestionsTool) {
+			calls.push(`tool:${definition.name}`);
+		},
+	} as unknown as ExtensionAPI);
+
+	expect(calls).toEqual(["tool:ask_questions"]);
+});
+
 test("package metadata follows Pi package distribution conventions", async () => {
 	const pkg = (await Bun.file("package.json").json()) as {
 		files?: string[];

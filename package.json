@@ -3,15 +3,15 @@
 	"version": "0.3.4",
 	"description": "Minimal ask_questions tool for Pi",
 	"type": "module",
-	"author": "drsh4dow <daniel.morettiv@gmail.com> (https://github.com/drsh4dow)",
+	"author": "drsh4dow <daniel.morettiv@gmail.com> (https://codeberg.org/drsh4dow)",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/drsh4dow/pi-questions.git"
+		"url": "git+https://codeberg.org/drsh4dow/pi-questions.git"
 	},
 	"bugs": {
-		"url": "https://github.com/drsh4dow/pi-questions/issues"
+		"url": "https://codeberg.org/drsh4dow/pi-questions/issues"
 	},
-	"homepage": "https://github.com/drsh4dow/pi-questions#readme",
+	"homepage": "https://codeberg.org/drsh4dow/pi-questions#readme",
 	"scripts": {
 		"check": "biome check .",
 		"check:fix": "biome check --write .",

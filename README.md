@@ -1,7 +1,6 @@
 # pi-questions
 
 [![npm version](https://img.shields.io/npm/v/pi-questions.svg)](https://www.npmjs.com/package/pi-questions)
-[![CI](https://github.com/drsh4dow/pi-questions/actions/workflows/ci.yml/badge.svg)](https://github.com/drsh4dow/pi-questions/actions/workflows/ci.yml)
 
 One Pi tool for asking the user.
 

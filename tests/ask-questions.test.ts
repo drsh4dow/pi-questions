@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { visibleWidth } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 import askQuestionsExtension from "../extensions/ask-questions.ts";
 
@@ -40,6 +40,40 @@ function createTheme() {
 	};
 }
 
+function interactiveContext(
+	interact: (component: RenderableComponent, submitted: () => unknown) => void,
+): ExtensionContext {
+	return {
+		hasUI: true,
+		ui: {
+			async custom(factory: unknown) {
+				let submitted: unknown;
+				const component = (
+					factory as (
+						tui: {
+							requestRender: () => void;
+							terminal: { rows: number };
+						},
+						theme: ReturnType<typeof createTheme>,
+						keybindings: unknown,
+						done: (value: unknown) => void,
+					) => RenderableComponent
+				)(
+					{ requestRender() {}, terminal: { rows: 24 } },
+					createTheme(),
+					{},
+					(value) => {
+						submitted = value;
+					},
+				);
+
+				interact(component, () => submitted);
+				return submitted;
+			},
+		},
+	} as ExtensionContext;
+}
+
 test("registers a small broadly positioned ask_questions tool without exposing custom-answer config", () => {
 	const tool = getTool();
 	const parameters = tool.parameters as unknown as {
@@ -49,14 +83,17 @@ test("registers a small broadly positioned ask_questions tool without exposing c
 				maxItems?: number;
 				items: {
 					properties: Record<string, unknown> & {
-						header: { maxLength?: number };
-						question: { maxLength?: number };
+						header: { minLength?: number; maxLength?: number };
+						question: { minLength?: number; maxLength?: number };
 						allowCustom?: unknown;
 						options: {
 							items: {
 								properties: {
-									label: { maxLength?: number };
-									description: { maxLength?: number };
+									label: { minLength?: number; maxLength?: number };
+									description: {
+										minLength?: number;
+										maxLength?: number;
+									};
 								};
 							};
 						};
@@ -86,14 +123,22 @@ test("registers a small broadly positioned ask_questions tool without exposing c
 	expect(promptGuidelineText).toContain("rhetorical");
 	expect(promptGuidelineText).toContain("lightweight next-step question");
 	expect(promptGuidelineText).toContain("batch");
+	expect(promptGuidelineText).toContain("question concise");
 	expect(promptGuidelineText).toContain("recommended option first");
 	expect(promptGuidelineText).not.toContain("planning");
 	expect(questions.minItems).toBe(1);
 	expect(questions.maxItems).toBe(6);
-	expect(questionProps.header.maxLength).toBe(50);
-	expect(questionProps.question.maxLength).toBe(500);
-	expect(optionProps.label.maxLength).toBe(120);
-	expect(optionProps.description.maxLength).toBe(240);
+	expect(questionProps.header.minLength).toBe(1);
+	expect(questionProps.question.minLength).toBe(1);
+	expect(optionProps.label.minLength).toBe(1);
+	expect(optionProps.description.minLength).toBe(1);
+	expect(questionProps.header.maxLength).toBeUndefined();
+	expect(questionProps.question.maxLength).toBeUndefined();
+	expect(optionProps.label.maxLength).toBeUndefined();
+	expect(optionProps.description.maxLength).toBeUndefined();
+	expect(questionProps.question).toMatchObject({
+		description: expect.stringContaining("aim for 120 characters"),
+	});
 	expect(questionProps.allowCustom).toBeUndefined();
 });
 
@@ -121,9 +166,9 @@ test("package metadata follows Pi package distribution conventions", async () =>
 	expect(pkg.pi?.extensions).toEqual(["./extensions/ask-questions.ts"]);
 	expect(pkg.files).toEqual(["extensions", "README.md"]);
 	expect(pkg.peerDependencies).toEqual({
-		"@mariozechner/pi-ai": "*",
-		"@mariozechner/pi-coding-agent": "*",
-		"@mariozechner/pi-tui": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		typebox: "*",
 	});
 });
 
@@ -175,27 +220,9 @@ test("keeps the cancelled flow unchanged", async () => {
 		},
 		undefined,
 		undefined,
-		{
-			hasUI: true,
-			ui: {
-				async custom(factory: unknown) {
-					let submitted: unknown;
-					const component = (
-						factory as (
-							tui: { requestRender: () => void },
-							theme: ReturnType<typeof createTheme>,
-							keybindings: unknown,
-							done: (value: unknown) => void,
-						) => RenderableComponent
-					)({ requestRender() {} }, createTheme(), {}, (value) => {
-						submitted = value;
-					});
-
-					component.handleInput("\u001b");
-					return submitted;
-				},
-			},
-		} as ExtensionContext,
+		interactiveContext((component) => {
+			component.handleInput("\u001b");
+		}),
 	);
 
 	expect(result.content[0]).toEqual({
@@ -234,28 +261,10 @@ test("returns full question text in the agent-facing result", async () => {
 		},
 		undefined,
 		undefined,
-		{
-			hasUI: true,
-			ui: {
-				async custom(factory: unknown) {
-					let submitted: unknown;
-					const component = (
-						factory as (
-							tui: { requestRender: () => void },
-							theme: ReturnType<typeof createTheme>,
-							keybindings: unknown,
-							done: (value: unknown) => void,
-						) => RenderableComponent
-					)({ requestRender() {} }, createTheme(), {}, (value) => {
-						submitted = value;
-					});
-
-					component.handleInput("j");
-					component.handleInput("l");
-					return submitted;
-				},
-			},
-		} as ExtensionContext,
+		interactiveContext((component) => {
+			component.handleInput("j");
+			component.handleInput("l");
+		}),
 	);
 
 	expect(result.content[0]).toEqual({
@@ -298,32 +307,14 @@ test("always offers a typed answer path", async () => {
 		},
 		undefined,
 		undefined,
-		{
-			hasUI: true,
-			ui: {
-				async custom(factory: unknown) {
-					let submitted: unknown;
-					const component = (
-						factory as (
-							tui: { requestRender: () => void },
-							theme: ReturnType<typeof createTheme>,
-							keybindings: unknown,
-							done: (value: unknown) => void,
-						) => RenderableComponent
-					)({ requestRender() {} }, createTheme(), {}, (value) => {
-						submitted = value;
-					});
-
-					component.handleInput("j");
-					component.handleInput("l");
-					for (const char of "Custom stack") {
-						component.handleInput(char);
-					}
-					component.handleInput("\r");
-					return submitted;
-				},
-			},
-		} as ExtensionContext,
+		interactiveContext((component) => {
+			component.handleInput("j");
+			component.handleInput("l");
+			for (const char of "Custom stack") {
+				component.handleInput(char);
+			}
+			component.handleInput("\r");
+		}),
 	);
 
 	expect(result.content[0]).toEqual({
@@ -351,6 +342,36 @@ test("always offers a typed answer path", async () => {
 	});
 });
 
+test("keeps the custom editor open when the answer is blank", async () => {
+	const tool = getTool();
+	let rendered: string[] = [];
+	const result = await tool.execute(
+		"call-blank-custom",
+		{
+			questions: [
+				{
+					question: "Which runtime should we use?",
+					options: [{ label: "Bun" }],
+				},
+			],
+		},
+		undefined,
+		undefined,
+		interactiveContext((component) => {
+			component.handleInput("j");
+			component.handleInput("l");
+			component.handleInput("\r");
+			rendered = component.render(80);
+			expect(() => component.render(2)).not.toThrow();
+			component.handleInput("\u001b");
+			component.handleInput("\u001b");
+		}),
+	);
+
+	expect(rendered.join("\n")).toContain("Type answer");
+	expect(result.details).toMatchObject({ status: "cancelled" });
+});
+
 test("does not use l like enter on the review screen", async () => {
 	const tool = getTool();
 	const result = await tool.execute(
@@ -371,30 +392,12 @@ test("does not use l like enter on the review screen", async () => {
 		},
 		undefined,
 		undefined,
-		{
-			hasUI: true,
-			ui: {
-				async custom(factory: unknown) {
-					let submitted: unknown;
-					const component = (
-						factory as (
-							tui: { requestRender: () => void },
-							theme: ReturnType<typeof createTheme>,
-							keybindings: unknown,
-							done: (value: unknown) => void,
-						) => RenderableComponent
-					)({ requestRender() {} }, createTheme(), {}, (value) => {
-						submitted = value;
-					});
-
-					component.handleInput("l");
-					component.handleInput("l");
-					expect(submitted).toBeUndefined();
-					component.handleInput("\r");
-					return submitted;
-				},
-			},
-		} as ExtensionContext,
+		interactiveContext((component, submitted) => {
+			component.handleInput("l");
+			component.handleInput("l");
+			expect(submitted()).toBeUndefined();
+			component.handleInput("\r");
+		}),
 	);
 
 	expect(result.content[0]).toEqual({
@@ -427,29 +430,11 @@ test("rerenders cached TUI lines when the available width changes", async () => 
 		},
 		undefined,
 		undefined,
-		{
-			hasUI: true,
-			ui: {
-				async custom(factory: unknown) {
-					let submitted: unknown;
-					const component = (
-						factory as (
-							tui: { requestRender: () => void },
-							theme: ReturnType<typeof createTheme>,
-							keybindings: unknown,
-							done: (value: unknown) => void,
-						) => RenderableComponent
-					)({ requestRender() {} }, createTheme(), {}, (value) => {
-						submitted = value;
-					});
-
-					narrow = component.render(24);
-					wide = component.render(80);
-					component.handleInput("\r");
-					return submitted;
-				},
-			},
-		} as ExtensionContext,
+		interactiveContext((component) => {
+			narrow = component.render(24);
+			wide = component.render(80);
+			component.handleInput("\r");
+		}),
 	);
 
 	const normalizedNarrow = narrow.join(" ").replace(/\s+/g, " ").trim();
@@ -476,28 +461,10 @@ test("wraps long questions in the TUI instead of truncating them", async () => {
 		},
 		undefined,
 		undefined,
-		{
-			hasUI: true,
-			ui: {
-				async custom(factory: unknown) {
-					let submitted: unknown;
-					const component = (
-						factory as (
-							tui: { requestRender: () => void },
-							theme: ReturnType<typeof createTheme>,
-							keybindings: unknown,
-							done: (value: unknown) => void,
-						) => RenderableComponent
-					)({ requestRender() {} }, createTheme(), {}, (value) => {
-						submitted = value;
-					});
-
-					rendered = component.render(24);
-					component.handleInput("\r");
-					return submitted;
-				},
-			},
-		} as ExtensionContext,
+		interactiveContext((component) => {
+			rendered = component.render(24);
+			component.handleInput("\r");
+		}),
 	);
 
 	const normalized = rendered.join(" ").replace(/\s+/g, " ").trim();

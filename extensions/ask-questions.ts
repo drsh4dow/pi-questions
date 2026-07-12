@@ -1,9 +1,8 @@
-import { type Static, Type } from "@mariozechner/pi-ai";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
 	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
 	Editor,
 	type EditorTheme,
@@ -13,7 +12,8 @@ import {
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
+import { type Static, Type } from "typebox";
 
 const TOOL_NAME = "ask_questions";
 const TOOL_TITLE = ` ${TOOL_NAME} `;
@@ -27,14 +27,12 @@ const CANCELLED_TEXT =
 const OptionSchema = Type.Object({
 	label: Type.String({
 		minLength: 1,
-		maxLength: 120,
-		description: "Display label for the option",
+		description: "Concrete option label; aim for 40 characters or fewer",
 	}),
 	description: Type.Optional(
 		Type.String({
 			minLength: 1,
-			maxLength: 240,
-			description: "Optional short explanation",
+			description: "Optional explanation; aim for 100 characters or fewer",
 		}),
 	),
 });
@@ -43,14 +41,13 @@ const QuestionSchema = Type.Object({
 	header: Type.Optional(
 		Type.String({
 			minLength: 1,
-			maxLength: 50,
-			description: "Short progress label",
+			description: "Short progress label; aim for 30 characters or fewer",
 		}),
 	),
 	question: Type.String({
 		minLength: 1,
-		maxLength: 500,
-		description: "Question shown to the user",
+		description:
+			"Concise question, usually one sentence; aim for 120 characters or fewer",
 	}),
 	options: Type.Array(OptionSchema, {
 		minItems: 1,
@@ -266,7 +263,6 @@ async function askQuestionsInTui(
 			const current = question();
 			const next = value.trim();
 			if (!current || !next) {
-				resetEditor();
 				refresh();
 				return;
 			}
@@ -329,7 +325,7 @@ async function askQuestionsInTui(
 				const active = index === selection();
 				const picked = option.isCustom
 					? answer()?.wasCustom === true
-					: answer()?.answer === option.label;
+					: answer()?.optionIndex === index + 1;
 				const color = active ? "accent" : picked ? "success" : "text";
 				addWrapped(
 					(active ? theme.fg("accent", "> ") : "  ") +
@@ -343,7 +339,7 @@ async function askQuestionsInTui(
 					addWrapped("   ", theme.fg("muted", drafts[screen] ?? ""));
 				}
 				if (option.isCustom && editing && active) {
-					for (const line of editor.render(width - 3)) {
+					for (const line of editor.render(Math.max(1, width - 3))) {
 						add(`   ${line}`);
 					}
 				}
@@ -450,7 +446,7 @@ export default function askQuestionsExtension(pi: ExtensionAPI) {
 		promptSnippet: "Ask structured questions for missing user input.",
 		promptGuidelines: [
 			"Use ask_questions for direct user questions unless the question is trivial, rhetorical, or only a lightweight next-step question at the end of a normal answer.",
-			"Use ask_questions to batch related questions. Keep options short and concrete, and put the recommended option first when helpful.",
+			"Use ask_questions to batch related questions. Keep each question concise, keep options short and concrete, and put the recommended option first when helpful.",
 		],
 		parameters: AskQuestionsParams,
 		executionMode: "sequential",
